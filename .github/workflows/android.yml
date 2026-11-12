@@ -28,7 +28,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-          cache: gradle
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -52,6 +51,10 @@ jobs:
         run: |
           cp -r native-overlay/android/* android/
           rm -f android/app/src/main/java/com/aiwake/app/MainActivity.java
+          sed -i -E 's/[[:space:]]*package="[^"]*"//g' android/app/src/main/AndroidManifest.xml
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Configure Kotlin, WorkManager, SDK versions, and app versioning
         env:
@@ -109,6 +112,20 @@ jobs:
             fs.writeFileSync("android/app/build.gradle", appGradle);
             console.log(`Configured Android build: versionCode=${runNum}, versionName=${versionName}`);
           '
+          grep -q "kotlin-gradle-plugin" android/build.gradle || { echo "ERROR: Missing kotlin-gradle-plugin in android/build.gradle" >&2; exit 1; }
+          grep -q "kotlin-android" android/app/build.gradle || { echo "ERROR: Missing kotlin-android in android/app/build.gradle" >&2; exit 1; }
+          grep -q "androidx.work:work-runtime" android/app/build.gradle || { echo "ERROR: Missing androidx.work:work-runtime in android/app/build.gradle" >&2; exit 1; }
+          grep -qE "versionCode[[:space:]]+${RUN_NUMBER}\b" android/app/build.gradle || { echo "ERROR: Expected versionCode ${RUN_NUMBER} not found in android/app/build.gradle" >&2; exit 1; }
+
+      - name: Convert SVG assets to PNG and verify required files
+        run: |
+          node scripts/generate-assets.mjs
+          for f in icon-only.png icon-foreground.png icon-background.png splash.png; do
+            if [ ! -f "assets/$f" ]; then
+              echo "ERROR: Required asset assets/$f is missing." >&2
+              exit 1
+            fi
+          done
 
       - name: Generate Android icons and splash screens
         run: npm run assets
