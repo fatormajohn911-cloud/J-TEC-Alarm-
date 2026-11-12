@@ -1,0 +1,6 @@
+{
+  "name": "AI Wake",
+  "description": "Intelligent Android alarm clock and personal wake-up assistant with premium tactile design, schedule integration, and native AlarmManager architecture.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
