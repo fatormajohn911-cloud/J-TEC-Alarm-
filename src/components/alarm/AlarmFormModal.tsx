@@ -1,8 +1,20 @@
 import React, { useState } from 'react';
+import { motion } from 'motion/react';
 import { Alarm, AVAILABLE_SOUNDS } from '../../types/alarm';
 import { alarmAudio } from '../../services/nativeAlarmPlugin';
+import { hapticsService } from '../../services/hapticsService';
 import { ToggleSwitch } from '../common/ToggleSwitch';
-import { X, Play, Square, Sparkles, Volume2, Clock, Check } from 'lucide-react';
+import {
+  X,
+  Play,
+  Square,
+  Volume2,
+  Clock,
+  Check,
+  ChevronUp,
+  ChevronDown,
+} from 'lucide-react';
+import { AiIcon } from '../common/AiIcon';
 
 interface AlarmFormModalProps {
   isOpen: boolean;
@@ -22,6 +34,8 @@ const DAYS = [
   { index: 6, label: 'Sat', short: 'S' },
 ];
 
+const SNOOZE_CHIPS = [5, 9, 10, 15];
+
 export const AlarmFormModal: React.FC<AlarmFormModalProps> = ({
   isOpen,
   initialAlarm,
@@ -31,18 +45,19 @@ export const AlarmFormModal: React.FC<AlarmFormModalProps> = ({
 }) => {
   const isEditing = Boolean(initialAlarm);
 
-  const [hours, setHours] = useState(() => {
+  // Parse initial hours & minutes
+  const [hourNum, setHourNum] = useState<number>(() => {
     if (initialAlarm) {
-      return initialAlarm.time.split(':')[0];
+      return parseInt(initialAlarm.time.split(':')[0], 10);
     }
-    return '07';
+    return 7;
   });
 
-  const [minutes, setMinutes] = useState(() => {
+  const [minNum, setMinNum] = useState<number>(() => {
     if (initialAlarm) {
-      return initialAlarm.time.split(':')[1];
+      return parseInt(initialAlarm.time.split(':')[1], 10);
     }
-    return '00';
+    return 0;
   });
 
   const [label, setLabel] = useState(() => initialAlarm?.label || 'Morning Awakening');
@@ -63,7 +78,19 @@ export const AlarmFormModal: React.FC<AlarmFormModalProps> = ({
 
   if (!isOpen) return null;
 
+  // Wheel step helpers
+  const adjustHour = (delta: number) => {
+    hapticsService.selection();
+    setHourNum((prev) => (prev + delta + 24) % 24);
+  };
+
+  const adjustMinute = (delta: number) => {
+    hapticsService.selection();
+    setMinNum((prev) => (prev + delta + 60) % 60);
+  };
+
   const toggleDay = (dayIndex: number) => {
+    hapticsService.light();
     if (days.includes(dayIndex)) {
       setDays(days.filter((d) => d !== dayIndex));
     } else {
@@ -71,21 +98,36 @@ export const AlarmFormModal: React.FC<AlarmFormModalProps> = ({
     }
   };
 
-  const setWeekdayPreset = () => setDays([1, 2, 3, 4, 5]);
-  const setWeekendPreset = () => setDays([0, 6]);
-  const setEverydayPreset = () => setDays([0, 1, 2, 3, 4, 5, 6]);
-  const setOncePreset = () => setDays([]);
+  const setWeekdayPreset = () => {
+    hapticsService.light();
+    setDays([1, 2, 3, 4, 5]);
+  };
+  const setWeekendPreset = () => {
+    hapticsService.light();
+    setDays([0, 6]);
+  };
+  const setEverydayPreset = () => {
+    hapticsService.light();
+    setDays([0, 1, 2, 3, 4, 5, 6]);
+  };
+  const setOncePreset = () => {
+    hapticsService.light();
+    setDays([]);
+  };
 
   const handleTestSound = (idToTest: string) => {
+    hapticsService.light();
     setIsPlayingSound(true);
     alarmAudio.playTone(idToTest, volume);
-    setTimeout(() => setIsPlayingSound(false), 2600);
+    setTimeout(() => setIsPlayingSound(false), 2400);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const formattedHours = hours.padStart(2, '0');
-    const formattedMinutes = minutes.padStart(2, '0');
+    hapticsService.success();
+
+    const formattedHours = hourNum.toString().padStart(2, '0');
+    const formattedMinutes = minNum.toString().padStart(2, '0');
     const timeString = `${formattedHours}:${formattedMinutes}`;
 
     if (initialAlarm) {
@@ -120,117 +162,167 @@ export const AlarmFormModal: React.FC<AlarmFormModalProps> = ({
     onClose();
   };
 
+  // 12h display helpers
+  const period = hourNum >= 12 ? 'PM' : 'AM';
+  const display12Hour = hourNum % 12 || 12;
+
+  const toggleAmPm = () => {
+    hapticsService.selection();
+    setHourNum((prev) => (prev >= 12 ? prev - 12 : prev + 12));
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4 overflow-y-auto">
-      <div className="relative w-full max-w-lg rounded-3xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl my-8">
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-zinc-800/80">
-          <div className="flex items-center gap-2">
-            <Clock className="h-5 w-5 text-purple-400" />
-            <h2 className="text-lg font-bold text-zinc-100">
-              {isEditing ? 'Edit Alarm' : 'Set New Alarm'}
-            </h2>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-xs">
+      <div className="fixed inset-0" onClick={onClose} aria-hidden="true" />
+
+      <motion.div
+        initial={{ y: '100%' }}
+        animate={{ y: 0 }}
+        exit={{ y: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+        className="relative z-10 w-full max-w-lg rounded-t-[32px] bg-white shadow-2xl border-t border-gray-100 flex flex-col max-h-[92vh] overflow-hidden"
+      >
+        {/* Grab bar */}
+        <div className="pt-3 pb-1 flex justify-center">
+          <div className="h-1.5 w-12 rounded-full bg-gray-300" />
+        </div>
+
+        {/* Top Header */}
+        <div className="flex items-center justify-between px-6 py-3 border-b border-gray-100">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#9C1C7C]/10 text-[#9C1C7C]">
+              <Clock className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-[#1E1B4B]">
+                {isEditing ? 'Edit Alarm' : 'Set New Alarm'}
+              </h2>
+              <p className="text-xs text-[#6B7280]">Precise waking & morning briefing</p>
+            </div>
           </div>
+
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close dialog"
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors"
+            aria-label="Close"
+            className="flex h-10 w-10 items-center justify-center rounded-full text-gray-400 hover:text-[#1E1B4B] hover:bg-gray-100"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-5 space-y-6">
-          {/* Time Dial / Stepper */}
-          <div className="flex flex-col items-center justify-center rounded-2xl border border-zinc-800/80 bg-zinc-900/60 p-5">
-            <label className="text-xs font-medium text-zinc-400">Select Time</label>
-            <div className="mt-2 flex items-center gap-3 font-mono-numbers">
-              {/* Hour input */}
+        {/* Scrollable Form Body */}
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+          {/* 1. BIG WHEEL TIME PICKER (Never clipped, 12h/24h aware) */}
+          <div className="rounded-[28px] bg-[#F3F3F5] p-5 flex flex-col items-center justify-center border border-gray-100">
+            <span className="text-xs font-bold text-[#6B7280] uppercase tracking-wider mb-2">
+              Alarm Time
+            </span>
+
+            <div className="flex items-center justify-center gap-3 font-mono-numbers">
+              {/* Hour Wheel Stepper */}
               <div className="flex flex-col items-center">
-                <input
-                  type="number"
-                  min="0"
-                  max="23"
-                  value={hours}
-                  onChange={(e) => {
-                    const val = e.target.value.slice(-2);
-                    setHours(val);
-                  }}
-                  className="w-20 rounded-xl border border-zinc-700 bg-zinc-950 px-2 py-2 text-center text-3xl font-bold text-zinc-100 focus:border-purple-500 focus:outline-none"
-                  aria-label="Hours (0-23)"
-                />
-                <span className="mt-1 text-[11px] text-zinc-400 font-sans">Hour</span>
+                <button
+                  type="button"
+                  onClick={() => adjustHour(1)}
+                  aria-label="Increment hour"
+                  className="flex h-9 w-14 items-center justify-center rounded-xl bg-white hover:bg-gray-200 text-[#3B3D78] shadow-xs active:scale-95"
+                >
+                  <ChevronUp className="h-5 w-5" />
+                </button>
+
+                <div className="my-1.5 flex h-16 w-20 items-center justify-center rounded-2xl bg-white text-4xl sm:text-5xl font-extrabold text-[#1E1B4B] shadow-sm">
+                  {timeFormat24h
+                    ? hourNum.toString().padStart(2, '0')
+                    : display12Hour.toString().padStart(2, '0')}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => adjustHour(-1)}
+                  aria-label="Decrement hour"
+                  className="flex h-9 w-14 items-center justify-center rounded-xl bg-white hover:bg-gray-200 text-[#3B3D78] shadow-xs active:scale-95"
+                >
+                  <ChevronDown className="h-5 w-5" />
+                </button>
               </div>
 
-              <span className="text-3xl font-light text-purple-400">:</span>
+              <span className="text-3xl font-extrabold text-[#9C1C7C] pb-2">:</span>
 
-              {/* Minute input */}
+              {/* Minute Wheel Stepper */}
               <div className="flex flex-col items-center">
-                <input
-                  type="number"
-                  min="0"
-                  max="59"
-                  value={minutes}
-                  onChange={(e) => {
-                    const val = e.target.value.slice(-2);
-                    setMinutes(val);
-                  }}
-                  className="w-20 rounded-xl border border-zinc-700 bg-zinc-950 px-2 py-2 text-center text-3xl font-bold text-zinc-100 focus:border-purple-500 focus:outline-none"
-                  aria-label="Minutes (0-59)"
-                />
-                <span className="mt-1 text-[11px] text-zinc-400 font-sans">Minute</span>
+                <button
+                  type="button"
+                  onClick={() => adjustMinute(5)}
+                  aria-label="Increment 5 minutes"
+                  className="flex h-9 w-14 items-center justify-center rounded-xl bg-white hover:bg-gray-200 text-[#3B3D78] shadow-xs active:scale-95"
+                >
+                  <ChevronUp className="h-5 w-5" />
+                </button>
+
+                <div className="my-1.5 flex h-16 w-20 items-center justify-center rounded-2xl bg-white text-4xl sm:text-5xl font-extrabold text-[#1E1B4B] shadow-sm">
+                  {minNum.toString().padStart(2, '0')}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => adjustMinute(-5)}
+                  aria-label="Decrement 5 minutes"
+                  className="flex h-9 w-14 items-center justify-center rounded-xl bg-white hover:bg-gray-200 text-[#3B3D78] shadow-xs active:scale-95"
+                >
+                  <ChevronDown className="h-5 w-5" />
+                </button>
               </div>
+
+              {/* AM/PM Switcher if in 12h format */}
+              {!timeFormat24h && (
+                <div className="flex flex-col gap-1.5 ml-1 self-center">
+                  <button
+                    type="button"
+                    onClick={toggleAmPm}
+                    className={`h-10 px-3 rounded-xl font-bold text-xs uppercase transition-all shadow-xs ${
+                      period === 'AM'
+                        ? 'bg-[#3B3D78] text-white shadow-sm'
+                        : 'bg-white text-gray-400 hover:text-[#1E1B4B]'
+                    }`}
+                  >
+                    AM
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleAmPm}
+                    className={`h-10 px-3 rounded-xl font-bold text-xs uppercase transition-all shadow-xs ${
+                      period === 'PM'
+                        ? 'bg-[#3B3D78] text-white shadow-sm'
+                        : 'bg-white text-gray-400 hover:text-[#1E1B4B]'
+                    }`}
+                  >
+                    PM
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Alarm Label */}
+          {/* Label Input */}
           <div>
-            <label htmlFor="alarm-label" className="text-xs font-medium text-zinc-300">
-              Alarm Name
+            <label htmlFor="alarm-label-input" className="text-xs font-bold text-[#1E1B4B] block mb-1">
+              Alarm Label
             </label>
             <input
-              id="alarm-label"
+              id="alarm-label-input"
               type="text"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="e.g. Morning Awakening, Gym Session"
-              className="mt-1.5 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3.5 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+              placeholder="e.g. Weekday Awakening, Morning Run"
+              className="w-full rounded-2xl bg-[#F3F3F5] px-4 py-3 text-sm text-[#1E1B4B] placeholder:text-gray-400 focus:bg-white focus:ring-2 focus:ring-[#9C1C7C] focus:outline-none transition-all"
             />
           </div>
 
-          {/* Repeat Days */}
+          {/* 2. REPEAT: DAY CHIPS PLUS SHORTCUTS BELOW */}
           <div>
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-zinc-300">Repeat Days</label>
-              <div className="flex items-center gap-2 text-[11px] text-zinc-400">
-                <button
-                  type="button"
-                  onClick={setWeekdayPreset}
-                  className="hover:text-purple-300 underline underline-offset-2"
-                >
-                  Weekdays
-                </button>
-                <span>·</span>
-                <button
-                  type="button"
-                  onClick={setWeekendPreset}
-                  className="hover:text-purple-300 underline underline-offset-2"
-                >
-                  Weekend
-                </button>
-                <span>·</span>
-                <button
-                  type="button"
-                  onClick={setOncePreset}
-                  className="hover:text-purple-300 underline underline-offset-2"
-                >
-                  Once
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-2.5 grid grid-cols-7 gap-1.5">
+            <label className="text-xs font-bold text-[#1E1B4B] block mb-2">Repeat Days</label>
+            <div className="grid grid-cols-7 gap-1.5">
               {DAYS.map((d) => {
                 const isSelected = days.includes(d.index);
                 return (
@@ -240,10 +332,10 @@ export const AlarmFormModal: React.FC<AlarmFormModalProps> = ({
                     onClick={() => toggleDay(d.index)}
                     aria-label={`Toggle ${d.label}`}
                     aria-pressed={isSelected}
-                    className={`flex h-11 flex-col items-center justify-center rounded-xl border text-xs font-semibold transition-all ${
+                    className={`min-h-[48px] rounded-2xl text-xs font-bold flex flex-col items-center justify-center transition-all ${
                       isSelected
-                        ? 'border-purple-500 bg-purple-950/70 text-purple-200 shadow-sm'
-                        : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700'
+                        ? 'bg-[#3B3D78] text-white shadow-sm scale-102'
+                        : 'bg-[#F3F3F5] text-[#6B7280] hover:bg-gray-200'
                     }`}
                   >
                     <span>{d.short}</span>
@@ -251,37 +343,94 @@ export const AlarmFormModal: React.FC<AlarmFormModalProps> = ({
                 );
               })}
             </div>
+
+            {/* Shortcuts row below it */}
+            <div className="mt-2.5 flex items-center gap-2 overflow-x-auto">
+              <button
+                type="button"
+                onClick={setWeekdayPreset}
+                className="rounded-full bg-[#F3F3F5] hover:bg-gray-200 px-3 py-1.5 text-xs font-bold text-[#3B3D78] transition-colors"
+              >
+                Weekdays
+              </button>
+              <button
+                type="button"
+                onClick={setWeekendPreset}
+                className="rounded-full bg-[#F3F3F5] hover:bg-gray-200 px-3 py-1.5 text-xs font-bold text-[#3B3D78] transition-colors"
+              >
+                Weekends
+              </button>
+              <button
+                type="button"
+                onClick={setEverydayPreset}
+                className="rounded-full bg-[#F3F3F5] hover:bg-gray-200 px-3 py-1.5 text-xs font-bold text-[#3B3D78] transition-colors"
+              >
+                Every day
+              </button>
+              <button
+                type="button"
+                onClick={setOncePreset}
+                className="rounded-full bg-[#F3F3F5] hover:bg-gray-200 px-3 py-1.5 text-xs font-bold text-[#3B3D78] transition-colors"
+              >
+                Once
+              </button>
+            </div>
           </div>
 
-          {/* Alarm Sound Selection */}
+          {/* 3. SNOOZE AS SELECTABLE CHIPS (Instead of dropdown!) */}
           <div>
-            <label className="text-xs font-medium text-zinc-300">Ringtone Sound</label>
-            <div className="mt-2 space-y-2">
+            <label className="text-xs font-bold text-[#1E1B4B] block mb-2">Snooze Duration</label>
+            <div className="grid grid-cols-4 gap-2">
+              {SNOOZE_CHIPS.map((mins) => (
+                <button
+                  key={mins}
+                  type="button"
+                  onClick={() => {
+                    hapticsService.light();
+                    setSnoozeIntervalMinutes(mins);
+                  }}
+                  className={`min-h-[46px] rounded-2xl flex items-center justify-center font-bold text-xs transition-all ${
+                    snoozeIntervalMinutes === mins
+                      ? 'bg-[#9C1C7C] text-white shadow-sm scale-102'
+                      : 'bg-[#F3F3F5] text-[#1E1B4B] hover:bg-gray-200'
+                  }`}
+                >
+                  {mins} min
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 4. SOUND LIST WITH PREVIEW PLAY BUTTONS, VOLUME SLIDER, AND VIBRATE TOGGLE */}
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-[#1E1B4B] block">Alarm Sound</label>
+            <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
               {AVAILABLE_SOUNDS.map((sound) => {
                 const isSelected = soundId === sound.id;
                 return (
                   <div
                     key={sound.id}
-                    onClick={() => setSoundId(sound.id)}
-                    className={`flex cursor-pointer items-center justify-between rounded-xl border p-3 transition-colors ${
+                    onClick={() => {
+                      hapticsService.light();
+                      setSoundId(sound.id);
+                    }}
+                    className={`flex cursor-pointer items-center justify-between rounded-2xl p-3 transition-colors ${
                       isSelected
-                        ? 'border-purple-500/80 bg-purple-950/30 text-zinc-100'
-                        : 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-700'
+                        ? 'bg-[#9C1C7C]/10 border border-[#9C1C7C]/30 text-[#1E1B4B]'
+                        : 'bg-[#F3F3F5] text-[#6B7280] hover:bg-gray-200'
                     }`}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2.5">
                       <div
-                        className={`flex h-5 w-5 items-center justify-center rounded-full border ${
-                          isSelected
-                            ? 'border-purple-400 bg-purple-600 text-white'
-                            : 'border-zinc-600'
+                        className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                          isSelected ? 'bg-[#9C1C7C] text-white' : 'border-2 border-gray-300'
                         }`}
                       >
                         {isSelected && <Check className="h-3 w-3 stroke-[3]" />}
                       </div>
                       <div>
-                        <div className="text-xs font-semibold text-zinc-200">{sound.name}</div>
-                        <div className="text-[11px] text-zinc-400">{sound.description}</div>
+                        <div className="text-xs font-bold text-[#1E1B4B]">{sound.name}</div>
+                        <div className="text-[11px] text-[#6B7280]">{sound.description}</div>
                       </div>
                     </div>
 
@@ -292,125 +441,90 @@ export const AlarmFormModal: React.FC<AlarmFormModalProps> = ({
                         handleTestSound(sound.id);
                       }}
                       title="Preview Sound"
-                      aria-label={`Preview ${sound.name}`}
-                      className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-lg text-purple-400 hover:bg-purple-900/40 hover:text-white transition-colors"
+                      className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-[#9C1C7C] shadow-xs hover:scale-105"
                     >
                       {isPlayingSound ? (
-                        <Square className="h-3.5 w-3.5" />
+                        <Square className="h-3.5 w-3.5 fill-current" />
                       ) : (
-                        <Play className="h-3.5 w-3.5 fill-current" />
+                        <Play className="h-3.5 w-3.5 fill-current ml-0.5" />
                       )}
                     </button>
                   </div>
                 );
               })}
             </div>
-          </div>
 
-          {/* Volume slider */}
-          <div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-medium text-zinc-300 flex items-center gap-1.5">
-                <Volume2 className="h-3.5 w-3.5 text-zinc-400" />
-                Volume
-              </span>
-              <span className="font-mono-numbers text-zinc-400">{volume}%</span>
-            </div>
-            <input
-              type="range"
-              min="20"
-              max="100"
-              value={volume}
-              onChange={(e) => setVolume(parseInt(e.target.value, 10))}
-              className="mt-2 w-full accent-purple-500 cursor-pointer"
-            />
-          </div>
-
-          {/* Snooze & Vibrate Row */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
-              <label htmlFor="snooze-interval" className="text-xs font-medium text-zinc-300">
-                Snooze Duration
-              </label>
-              <select
-                id="snooze-interval"
-                value={snoozeIntervalMinutes}
-                onChange={(e) => setSnoozeIntervalMinutes(parseInt(e.target.value, 10))}
-                className="mt-1.5 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-zinc-200 focus:border-purple-500 focus:outline-none"
-              >
-                <option value={5}>5 minutes</option>
-                <option value={9}>9 minutes (classic)</option>
-                <option value={10}>10 minutes</option>
-                <option value={15}>15 minutes</option>
-              </select>
-            </div>
-
-            <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
-              <span className="text-xs font-medium text-zinc-300">Vibrate</span>
-              <ToggleSwitch checked={vibrate} onChange={setVibrate} label="Vibrate" />
-            </div>
-          </div>
-
-          {/* AI Morning Briefing Section */}
-          <div className="rounded-2xl border border-purple-900/50 bg-purple-950/20 p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-purple-400" />
-                <div>
-                  <h4 className="text-xs font-semibold text-zinc-100">AI Morning Briefing</h4>
-                  <p className="text-[11px] text-zinc-400">
-                    Spoken weather, agenda & encouragement upon wake-up
-                  </p>
-                </div>
+            {/* Volume slider */}
+            <div>
+              <div className="flex items-center justify-between text-xs mb-1.5">
+                <span className="font-bold text-[#1E1B4B] flex items-center gap-1.5">
+                  <Volume2 className="h-4 w-4 text-[#9C1C7C]" />
+                  Volume
+                </span>
+                <span className="font-mono-numbers font-bold text-[#9C1C7C]">{volume}%</span>
               </div>
-              <ToggleSwitch
-                checked={aiBriefing}
-                onChange={setAiBriefing}
-                label="AI Morning Briefing"
+              <input
+                type="range"
+                min="20"
+                max="100"
+                value={volume}
+                onChange={(e) => setVolume(parseInt(e.target.value, 10))}
+                className="w-full accent-[#9C1C7C]"
               />
             </div>
 
-            {aiBriefing && (
-              <div className="mt-3 pt-3 border-t border-purple-900/40">
-                <label className="text-[11px] font-medium text-zinc-400">Voice Style Persona</label>
-                <div className="mt-1.5 grid grid-cols-3 gap-2">
-                  {(['warm', 'coach', 'executive'] as const).map((style) => (
-                    <button
-                      key={style}
-                      type="button"
-                      onClick={() => setAiVoiceStyle(style)}
-                      className={`min-h-[44px] rounded-lg border px-2 py-1.5 text-xs font-medium capitalize transition-colors ${
-                        aiVoiceStyle === style
-                          ? 'border-purple-500 bg-purple-900/50 text-white'
-                          : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      {style}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Vibrate Toggle */}
+            <div className="flex items-center justify-between p-3 rounded-2xl bg-[#F3F3F5]">
+              <span className="text-xs font-bold text-[#1E1B4B]">Vibration Feedback</span>
+              <ToggleSwitch
+                checked={vibrate}
+                onChange={(v) => {
+                  hapticsService.light();
+                  setVibrate(v);
+                }}
+                label="Vibrate"
+              />
+            </div>
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-800/80">
-            <button
-              type="button"
-              onClick={onClose}
-              className="min-h-[44px] rounded-xl px-4 text-xs font-medium text-zinc-400 hover:text-white transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="min-h-[44px] rounded-xl bg-purple-600 hover:bg-purple-500 px-6 text-xs font-semibold text-white shadow-lg shadow-purple-600/25 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
-            >
-              {isEditing ? 'Save Changes' : 'Create Alarm'}
-            </button>
+          {/* AI Morning Briefing Toggle */}
+          <div className="p-3.5 rounded-2xl bg-[#9C1C7C]/5 border border-[#9C1C7C]/20 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AiIcon className="h-5 w-5 text-[#9C1C7C]" />
+              <div>
+                <h4 className="text-xs font-bold text-[#1E1B4B]">AI Morning Briefing</h4>
+                <p className="text-[11px] text-[#6B7280]">Spoken weather, agenda & encouragement</p>
+              </div>
+            </div>
+            <ToggleSwitch
+              checked={aiBriefing}
+              onChange={(v) => {
+                hapticsService.light();
+                setAiBriefing(v);
+              }}
+              label="AI Morning Briefing"
+            />
           </div>
         </form>
-      </div>
+
+        {/* 5. STICKY BOTTOM "SAVE ALARM" BUTTON (Always visible) */}
+        <div className="border-t border-gray-100 bg-white p-4 pb-safe flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 min-h-[50px] rounded-2xl bg-[#F3F3F5] hover:bg-gray-200 text-xs font-bold text-[#6B7280] transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            className="flex-[2] min-h-[50px] rounded-2xl bg-[#3B3D78] hover:bg-[#2E2F6B] text-white font-extrabold text-xs shadow-lg shadow-indigo-900/25 transition-all active:scale-98"
+          >
+            {isEditing ? 'Save Alarm Changes' : 'Set Alarm'}
+          </button>
+        </div>
+      </motion.div>
     </div>
   );
 };

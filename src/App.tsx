@@ -3,17 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { TabType } from './navigation/navigationTypes';
+import React, { useState, useEffect } from 'react';
+import { PageType } from './navigation/navigationTypes';
 import { Alarm } from './types/alarm';
 import { useAlarms } from './hooks/useAlarms';
 import { useSchedule } from './hooks/useSchedule';
 import { useSettings } from './hooks/useSettings';
-import { AppHeader } from './components/layout/AppHeader';
 import { BottomNavigation } from './components/layout/BottomNavigation';
 import { NotificationDrawer } from './components/layout/NotificationDrawer';
-import { AndroidStatusBarMock } from './components/layout/AndroidStatusBarMock';
 import { AlarmFormModal } from './components/alarm/AlarmFormModal';
+import { OnboardingModal } from './components/onboarding/OnboardingModal';
 
 // Pages
 import { HomePage } from './pages/HomePage';
@@ -24,10 +23,11 @@ import { SettingsPage } from './pages/SettingsPage';
 import { AlarmRingingScreen } from './pages/AlarmRingingScreen';
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<TabType>('home');
+  const [activePage, setActivePage] = useState<PageType>('home');
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [ringingAlarm, setRingingAlarm] = useState<Alarm | null>(null);
   const [isNewAlarmModalOpen, setIsNewAlarmModalOpen] = useState(false);
+  const [editingAlarm, setEditingAlarm] = useState<Alarm | null>(null);
 
   // Core business logic hooks
   const {
@@ -43,13 +43,34 @@ export default function App() {
     routines,
     selectedDay,
     setSelectedDay,
-    routinesForSelectedDay,
     toggleRoutine,
     addRoutine,
     deleteRoutine,
   } = useSchedule();
 
   const { settings, updateSetting, resetAllSettings } = useSettings();
+
+  // Handle Android hardware back button / browser back navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      if (activePage !== 'home') {
+        setActivePage('home');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [activePage]);
+
+  const navigateTo = (page: PageType) => {
+    if (page !== 'home') {
+      window.history.pushState({ page }, '');
+    }
+    setActivePage(page);
+  };
+
+  const navigateBackToHome = () => {
+    setActivePage('home');
+  };
 
   // Test ringing launcher
   const handleTriggerTestRing = (alarm?: Alarm) => {
@@ -84,7 +105,7 @@ export default function App() {
     await addAlarm({
       time: `${h}:${m}`,
       label: `Power Nap (${minutes}m)`,
-      days: [], // Once
+      days: [],
       enabled: true,
       soundId: 'lofi_wake',
       volume: 80,
@@ -95,25 +116,36 @@ export default function App() {
     });
   };
 
-  // Dismiss ringing
-  const handleDismissRinging = () => {
-    setRingingAlarm(null);
+  // Restore deleted alarm from Undo snackbar
+  const handleRestoreAlarm = async (restored: Alarm) => {
+    await addAlarm({
+      time: restored.time,
+      label: restored.label,
+      days: restored.days,
+      enabled: restored.enabled,
+      soundId: restored.soundId,
+      volume: restored.volume,
+      vibrate: restored.vibrate,
+      snoozeIntervalMinutes: restored.snoozeIntervalMinutes,
+      snoozeLimit: restored.snoozeLimit,
+      aiBriefing: restored.aiBriefing,
+      aiVoiceStyle: restored.aiVoiceStyle,
+    });
   };
 
-  // Snooze ringing
-  const handleSnoozeRinging = (snoozeMinutes: number) => {
-    setRingingAlarm(null);
-    // You could schedule a snooze alarm or display notification
+  // Onboarding completion
+  const handleCompleteOnboarding = (userName: string) => {
+    updateSetting('userName', userName);
+    updateSetting('onboardingCompleted', true);
   };
 
-  // 6. SPECIAL SCREEN: Full-Screen Alarm Ringing Experience
-  // When active, it completely replaces normal layout and bottom navigation!
+  // Full-Screen Alarm Ringing Experience
   if (ringingAlarm) {
     return (
       <AlarmRingingScreen
         alarm={ringingAlarm}
-        onDismiss={handleDismissRinging}
-        onSnooze={handleSnoozeRinging}
+        onDismiss={() => setRingingAlarm(null)}
+        onSnooze={() => setRingingAlarm(null)}
       />
     );
   }
@@ -121,110 +153,131 @@ export default function App() {
   const activeAlarmsCount = alarms.filter((a) => a.enabled).length;
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center">
-      {/* Optional Simulated Android Device Frame */}
-      <div
-        className={`w-full transition-all flex flex-col min-h-screen ${
-          settings.deviceFrameMockup
-            ? 'max-w-[420px] my-6 rounded-[44px] border-[6px] border-zinc-800 shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden bg-zinc-950 relative'
-            : 'max-w-3xl'
-        }`}
-      >
-        {/* Android Status Bar Mock (active in mockup mode or on top) */}
-        {settings.deviceFrameMockup && (
-          <AndroidStatusBarMock timeFormat24h={settings.timeFormat24h} />
-        )}
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-white text-[#1E1B4B] flex flex-col font-sans selection:bg-[#9C1C7C]/20 selection:text-[#9C1C7C]">
+      {/* 1. FIRST-RUN ONBOARDING (shown once until completed) */}
+      <OnboardingModal
+        isOpen={!settings.onboardingCompleted}
+        initialName={settings.userName || 'Alex'}
+        onComplete={handleCompleteOnboarding}
+      />
 
-        {/* Header */}
-        <AppHeader
-          currentTab={currentTab}
-          onNavigate={setCurrentTab}
-          onOpenNotifications={() => setIsNotificationOpen(true)}
-          onTriggerTestAlarm={() => handleTriggerTestRing()}
-          unreadCount={2}
-        />
-
-        {/* Main Content Area */}
-        <main className="flex-1 px-4 sm:px-6 pt-5">
-          {currentTab === 'home' && (
+      {/* Main Viewport */}
+      <div className="w-full flex-1 flex flex-col">
+        {/* HOME SCREEN */}
+        {activePage === 'home' && (
+          <div className="flex-1 flex flex-col transition-opacity duration-200">
             <HomePage
               nextAlarmInfo={nextAlarmInfo}
-              activeAlarmsCount={activeAlarmsCount}
-              todayRoutines={routinesForSelectedDay}
+              activeAlarms={alarms}
               settings={settings}
               onToggleAlarm={toggleAlarm}
-              onOpenCreateAlarm={() => setIsNewAlarmModalOpen(true)}
+              onOpenCreateAlarm={() => {
+                setEditingAlarm(null);
+                setIsNewAlarmModalOpen(true);
+              }}
+              onOpenEditAlarm={(alarm) => {
+                setEditingAlarm(alarm);
+                setIsNewAlarmModalOpen(true);
+              }}
+              onDeleteAlarm={deleteAlarm}
+              onRestoreAlarm={handleRestoreAlarm}
               onQuickCreateNap={handleQuickCreateNap}
-              onNavigate={setCurrentTab}
+              onNavigate={navigateTo}
               onTestRing={handleTriggerTestRing}
-              onToggleRoutine={toggleRoutine}
+              onOpenNotifications={() => setIsNotificationOpen(true)}
             />
-          )}
 
-          {currentTab === 'assistant' && (
-            <AssistantPage
-              onAddAlarm={addAlarm}
-              onNavigateToAlarms={() => setCurrentTab('alarms')}
+            {/* Bottom Navigation is ONLY shown on Home screen */}
+            <BottomNavigation
+              onNavigate={navigateTo}
+              onOpenNewAlarm={() => {
+                setEditingAlarm(null);
+                setIsNewAlarmModalOpen(true);
+              }}
+              alarmCount={activeAlarmsCount}
             />
-          )}
+          </div>
+        )}
 
-          {currentTab === 'schedule' && (
-            <SchedulePage
-              routines={routines}
-              selectedDay={selectedDay}
-              onSelectDay={setSelectedDay}
-              onToggleRoutine={toggleRoutine}
-              onAddRoutine={addRoutine}
-              onDeleteRoutine={deleteRoutine}
-            />
-          )}
-
-          {currentTab === 'alarms' && (
+        {/* FULL-SCREEN SUBPAGES (No bottom navigation, has back arrow to Home) */}
+        {activePage === 'alarms' && (
+          <div className="flex-1">
             <AlarmsPage
               alarms={alarms}
               timeFormat24h={settings.timeFormat24h}
+              onBack={navigateBackToHome}
               onToggleAlarm={toggleAlarm}
               onAddAlarm={addAlarm}
               onUpdateAlarm={updateAlarm}
               onDeleteAlarm={deleteAlarm}
               onTestRing={handleTriggerTestRing}
             />
-          )}
+          </div>
+        )}
 
-          {currentTab === 'settings' && (
+        {activePage === 'assistant' && (
+          <div className="flex-1">
+            <AssistantPage
+              onBack={navigateBackToHome}
+              onAddAlarm={addAlarm}
+              onNavigateToAlarms={() => navigateTo('alarms')}
+            />
+          </div>
+        )}
+
+        {activePage === 'schedule' && (
+          <div className="flex-1">
+            <SchedulePage
+              routines={routines}
+              selectedDay={selectedDay}
+              onBack={navigateBackToHome}
+              onSelectDay={setSelectedDay}
+              onToggleRoutine={toggleRoutine}
+              onAddRoutine={addRoutine}
+              onDeleteRoutine={deleteRoutine}
+            />
+          </div>
+        )}
+
+        {activePage === 'settings' && (
+          <div className="flex-1">
             <SettingsPage
               settings={settings}
+              onBack={navigateBackToHome}
               onUpdateSetting={updateSetting}
               onResetAll={resetAllSettings}
             />
-          )}
-        </main>
-
-        {/* Fixed Bottom Navigation */}
-        <BottomNavigation
-          currentTab={currentTab}
-          onTabChange={setCurrentTab}
-          alarmCount={activeAlarmsCount}
-        />
+          </div>
+        )}
       </div>
 
-      {/* Global Modals */}
+      {/* Global Notifications Drawer */}
       <NotificationDrawer
         isOpen={isNotificationOpen}
         onClose={() => setIsNotificationOpen(false)}
         onOpenSettings={() => {
           setIsNotificationOpen(false);
-          setCurrentTab('settings');
+          navigateTo('settings');
         }}
       />
 
+      {/* Bottom Sheet Alarm Form (Create or Edit) */}
       <AlarmFormModal
         isOpen={isNewAlarmModalOpen}
+        initialAlarm={editingAlarm}
         timeFormat24h={settings.timeFormat24h}
-        onClose={() => setIsNewAlarmModalOpen(false)}
-        onSave={(data) => {
-          addAlarm(data as any);
+        onClose={() => {
           setIsNewAlarmModalOpen(false);
+          setEditingAlarm(null);
+        }}
+        onSave={(data) => {
+          if ('id' in data) {
+            updateAlarm(data as Alarm);
+          } else {
+            addAlarm(data as any);
+          }
+          setIsNewAlarmModalOpen(false);
+          setEditingAlarm(null);
         }}
       />
     </div>

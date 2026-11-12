@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import { Alarm } from '../types/alarm';
 import { AlarmCard } from '../components/alarm/AlarmCard';
 import { AlarmFormModal } from '../components/alarm/AlarmFormModal';
-import { AlarmClock, Plus, ShieldCheck, Cpu } from 'lucide-react';
+import { PageHeader } from '../components/layout/PageHeader';
+import { AlarmClock, Plus, Cpu, ShieldCheck } from 'lucide-react';
 
 interface AlarmsPageProps {
   alarms: Alarm[];
   timeFormat24h?: boolean;
+  onBack: () => void;
   onToggleAlarm: (id: string) => void;
   onAddAlarm: (alarm: Omit<Alarm, 'id' | 'createdAt'>) => void;
   onUpdateAlarm: (alarm: Alarm) => void;
@@ -17,6 +19,7 @@ interface AlarmsPageProps {
 export const AlarmsPage: React.FC<AlarmsPageProps> = ({
   alarms,
   timeFormat24h = false,
+  onBack,
   onToggleAlarm,
   onAddAlarm,
   onUpdateAlarm,
@@ -47,77 +50,75 @@ export const AlarmsPage: React.FC<AlarmsPageProps> = ({
   const activeCount = alarms.filter((a) => a.enabled).length;
 
   return (
-    <div className="space-y-6 pb-24">
-      {/* 1. Header with Alarm Count & Add CTA */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-100">
-            Alarms
-          </h2>
-          <div className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
-            <span>{alarms.length} Configured</span>
-            <span aria-hidden="true">·</span>
-            <span className="text-purple-300 font-medium">{activeCount} Active</span>
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-white text-[#1E1B4B] flex flex-col">
+      {/* Top Bar with Back Arrow */}
+      <PageHeader
+        title="Alarms"
+        subtitle={`${activeCount} of ${alarms.length} active`}
+        onBack={onBack}
+        rightAction={
+          <button
+            type="button"
+            onClick={handleOpenCreate}
+            className="flex h-10 items-center gap-1 rounded-full bg-white text-[#3B3D78] px-3.5 py-1 text-xs font-bold shadow-sm hover:bg-gray-100 transition-colors"
+          >
+            <Plus className="h-4 w-4 stroke-[2.5]" />
+            <span>New</span>
+          </button>
+        }
+      />
+
+      <div className="mx-auto w-full max-w-xl px-4 py-5 space-y-4 flex-1">
+        {/* Android Architecture Callout */}
+        <div className="rounded-[22px] bg-[#F3F3F5] p-4 flex items-start gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#3B3D78]/15 text-[#3B3D78] mt-0.5">
+            <Cpu className="h-4 w-4" />
           </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={handleOpenCreate}
-          className="flex min-h-[44px] items-center gap-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-purple-600/20 transition-all active:scale-[0.98]"
-        >
-          <Plus className="h-4 w-4" />
-          <span>New Alarm</span>
-        </button>
-      </div>
-
-      {/* 2. Architecture Notice Banner */}
-      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-        <div className="flex items-start gap-3">
-          <Cpu className="mt-0.5 h-4 w-4 text-purple-400 shrink-0" />
-          <div className="text-xs text-zinc-400 leading-relaxed">
-            <span className="font-semibold text-zinc-200">Native Android AlarmManager Architecture:</span>
+          <div className="text-xs text-[#6B7280] leading-relaxed">
+            <span className="font-bold text-[#1E1B4B]">Android Exact Alarm Engine:</span>
             <p className="mt-0.5">
-              Alarms are orchestrated through the <code className="text-purple-300">AlarmPluginInterface</code>. In Phase 1, UI states and web audio emulation are live. When compiled as an APK, calls route directly to Android's exact wake-lock AlarmManager.
+              Alarms are registered with <code className="text-[#9C1C7C] font-semibold">AlarmManager.setAlarmClock()</code> to trigger exact wakeups even in deep Doze mode.
             </p>
           </div>
         </div>
+
+        {/* Alarms List */}
+        <div className="space-y-3.5 pb-20">
+          {alarms.length > 0 ? (
+            alarms.map((alarm) => (
+              <AlarmCard
+                key={alarm.id}
+                alarm={alarm}
+                timeFormat24h={timeFormat24h}
+                onToggle={onToggleAlarm}
+                onEdit={handleOpenEdit}
+                onDelete={onDeleteAlarm}
+                onTestRing={onTestRing}
+              />
+            ))
+          ) : (
+            <div className="flex flex-col items-center justify-center rounded-[28px] border-2 border-dashed border-gray-200 p-12 text-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#9C1C7C]/10 text-[#9C1C7C] mb-3">
+                <AlarmClock className="h-8 w-8 stroke-[2]" />
+              </div>
+              <h3 className="text-base font-bold text-[#1E1B4B]">No alarms yet</h3>
+              <p className="mt-1 text-xs text-[#6B7280] max-w-xs">
+                Create your first alarm with custom repeat days and gentle sounds.
+              </p>
+              <button
+                type="button"
+                onClick={handleOpenCreate}
+                className="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-2xl bg-[#3B3D78] hover:bg-[#2E2F6B] px-5 text-xs font-bold text-white shadow-md transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Create Alarm</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* 3. Alarm List */}
-      <div className="space-y-3.5">
-        {alarms.length > 0 ? (
-          alarms.map((alarm) => (
-            <AlarmCard
-              key={alarm.id}
-              alarm={alarm}
-              timeFormat24h={timeFormat24h}
-              onToggle={onToggleAlarm}
-              onEdit={handleOpenEdit}
-              onDelete={onDeleteAlarm}
-              onTestRing={onTestRing}
-            />
-          ))
-        ) : (
-          <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-zinc-800 p-12 text-center">
-            <AlarmClock className="h-12 w-12 text-zinc-600 mb-3" />
-            <h3 className="text-base font-semibold text-zinc-300">No alarms created yet</h3>
-            <p className="mt-1 text-xs text-zinc-400 max-w-xs">
-              Set up your first waking schedule with gentle chimes and optional AI morning briefing.
-            </p>
-            <button
-              type="button"
-              onClick={handleOpenCreate}
-              className="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-purple-600 hover:bg-purple-500 px-5 text-xs font-semibold text-white shadow-md transition-colors"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Create Your First Alarm</span>
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Create / Edit Modal Dialog */}
+      {/* Edit/Create Modal */}
       <AlarmFormModal
         isOpen={isModalOpen}
         initialAlarm={editingAlarm}

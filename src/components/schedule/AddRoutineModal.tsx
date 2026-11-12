@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ScheduleRoutine, ScheduleCategory } from '../../types/schedule';
-import { X, Calendar, Clock, Plus } from 'lucide-react';
+import { X, Calendar } from 'lucide-react';
 
 interface AddRoutineModalProps {
   isOpen: boolean;
@@ -48,18 +48,23 @@ export const AddRoutineModal: React.FC<AddRoutineModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4">
-      <div className="relative w-full max-w-md rounded-3xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
-        <div className="flex items-center justify-between pb-4 border-b border-zinc-800/80">
-          <div className="flex items-center gap-2">
-            <Calendar className="h-5 w-5 text-purple-400" />
-            <h2 className="text-base font-bold text-zinc-100">Add Schedule Routine</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="relative w-full max-w-md rounded-[32px] bg-white p-6 shadow-2xl border border-gray-100">
+        <div className="flex items-center justify-between pb-4 border-b border-gray-100">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#12A6A0]/15 text-[#12A6A0]">
+              <Calendar className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-[#1E1B4B]">Add Schedule Routine</h2>
+              <p className="text-xs text-[#6B7280]">Link habits with waking schedule</p>
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close modal"
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-gray-400 hover:text-[#1E1B4B] hover:bg-gray-100 transition-colors"
           >
             <X className="h-5 w-5" />
           </button>
@@ -67,63 +72,63 @@ export const AddRoutineModal: React.FC<AddRoutineModalProps> = ({
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           <div>
-            <label htmlFor="routine-title" className="text-xs font-medium text-zinc-300">
-              Routine / Task Title
+            <label htmlFor="routine-title-input" className="text-xs font-bold text-[#1E1B4B]">
+              Routine Title
             </label>
             <input
-              id="routine-title"
+              id="routine-title-input"
               type="text"
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Morning Hydration, 30m Mobility"
-              className="mt-1.5 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3.5 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-purple-500 focus:outline-none"
+              placeholder="e.g. Morning Hydration & Sunlight"
+              className="mt-1.5 w-full rounded-2xl bg-[#F3F3F5] border-none px-4 py-3 text-sm text-[#1E1B4B] placeholder:text-gray-400 focus:bg-white focus:ring-2 focus:ring-[#9C1C7C] focus:outline-none"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label htmlFor="routine-time" className="text-xs font-medium text-zinc-300">
+              <label htmlFor="routine-start-time" className="text-xs font-bold text-[#1E1B4B]">
                 Start Time
               </label>
               <input
-                id="routine-time"
+                id="routine-start-time"
                 type="time"
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-purple-500 focus:outline-none"
+                className="mt-1.5 w-full rounded-2xl bg-[#F3F3F5] border-none px-3.5 py-2.5 text-sm text-[#1E1B4B] focus:bg-white focus:ring-2 focus:ring-[#9C1C7C] focus:outline-none"
               />
             </div>
 
             <div>
-              <label htmlFor="routine-duration" className="text-xs font-medium text-zinc-300">
+              <label htmlFor="routine-duration-mins" className="text-xs font-bold text-[#1E1B4B]">
                 Duration (min)
               </label>
               <input
-                id="routine-duration"
+                id="routine-duration-mins"
                 type="number"
                 min="5"
                 max="240"
                 step="5"
                 value={durationMinutes}
                 onChange={(e) => setDurationMinutes(parseInt(e.target.value, 10) || 15)}
-                className="mt-1.5 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-purple-500 focus:outline-none"
+                className="mt-1.5 w-full rounded-2xl bg-[#F3F3F5] border-none px-3.5 py-2.5 text-sm text-[#1E1B4B] focus:bg-white focus:ring-2 focus:ring-[#9C1C7C] focus:outline-none"
               />
             </div>
           </div>
 
           <div>
-            <label className="text-xs font-medium text-zinc-300">Category</label>
+            <label className="text-xs font-bold text-[#1E1B4B]">Category</label>
             <div className="mt-1.5 grid grid-cols-2 gap-2">
               {CATEGORIES.map((c) => (
                 <button
                   key={c.id}
                   type="button"
                   onClick={() => setCategory(c.id)}
-                  className={`rounded-xl border p-2 text-xs font-medium text-left transition-colors ${
+                  className={`rounded-2xl p-2.5 text-xs font-semibold text-left transition-colors ${
                     category === c.id
-                      ? 'border-purple-500 bg-purple-950/40 text-purple-200'
-                      : 'border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200'
+                      ? 'bg-[#3B3D78] text-white shadow-xs'
+                      : 'bg-[#F3F3F5] text-[#6B7280] hover:bg-gray-200'
                   }`}
                 >
                   {c.label}
@@ -133,30 +138,30 @@ export const AddRoutineModal: React.FC<AddRoutineModalProps> = ({
           </div>
 
           <div>
-            <label htmlFor="routine-notes" className="text-xs font-medium text-zinc-300">
-              Protocol Notes (Optional)
+            <label htmlFor="routine-notes-area" className="text-xs font-bold text-[#1E1B4B]">
+              Notes / Instructions
             </label>
             <textarea
-              id="routine-notes"
+              id="routine-notes-area"
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Drink 500ml water, light stretches"
-              className="mt-1.5 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3.5 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 focus:border-purple-500 focus:outline-none"
+              placeholder="e.g. 500ml water with lemon, outdoor walking"
+              className="mt-1.5 w-full rounded-2xl bg-[#F3F3F5] border-none px-4 py-2.5 text-xs text-[#1E1B4B] placeholder:text-gray-400 focus:bg-white focus:ring-2 focus:ring-[#9C1C7C] focus:outline-none"
             />
           </div>
 
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-800/80">
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
             <button
               type="button"
               onClick={onClose}
-              className="min-h-[44px] rounded-xl px-4 text-xs font-medium text-zinc-400 hover:text-white"
+              className="min-h-[44px] rounded-2xl px-4 text-xs font-bold text-[#6B7280] hover:text-[#1E1B4B]"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="min-h-[44px] rounded-xl bg-purple-600 hover:bg-purple-500 px-5 text-xs font-semibold text-white shadow-md transition-colors"
+              className="min-h-[44px] rounded-2xl bg-[#3B3D78] hover:bg-[#2E2F6B] px-6 text-xs font-bold text-white shadow-md transition-all active:scale-95"
             >
               Add Routine
             </button>

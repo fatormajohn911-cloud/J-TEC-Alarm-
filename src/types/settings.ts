@@ -15,11 +15,16 @@ export interface AppSettings {
   batteryOptimizationExempt: boolean;
   notificationPermission: boolean;
   fullScreenIntentPermission: boolean;
+  // User personalization
+  userName: string;
+  onboardingCompleted: boolean;
   // UI Display mode
   deviceFrameMockup: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  userName: 'Alex',
+  onboardingCompleted: false,
   timeFormat24h: false,
   showSeconds: true,
   hapticFeedback: true,

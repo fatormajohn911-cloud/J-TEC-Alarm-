@@ -1,34 +1,35 @@
 import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { AssistantState, ChatMessage } from '../types/assistant';
 import { Alarm } from '../types/alarm';
 import { storageService } from '../services/storageService';
+import { PageHeader } from '../components/layout/PageHeader';
+import { hapticsService } from '../services/hapticsService';
 import {
-  Sparkles,
   Mic,
   MicOff,
   Send,
   CheckCircle2,
-  AlertCircle,
   Clock,
-  Volume2,
-  Calendar,
-  Layers,
+  AlarmClock,
 } from 'lucide-react';
 
 interface AssistantPageProps {
+  onBack: () => void;
   onAddAlarm: (alarm: Omit<Alarm, 'id' | 'createdAt'>) => void;
-  onNavigateToAlarms: () => void;
+  onNavigateToAlarms?: () => void;
 }
 
-const SAMPLE_PROMPTS = [
-  'Set an alarm for 6:30 AM weekdays with AI briefing',
-  'Schedule a 25-minute power recharge nap',
-  'Wake me up gently at 8:00 AM on Saturday',
+const SUGGESTION_CHIPS = [
+  'Wake me at 6:30 on weekdays',
+  'Set a 20 min nap',
+  'What can AI Wake do?',
+  'Schedule 8:00 AM gentle awake',
 ];
 
 export const AssistantPage: React.FC<AssistantPageProps> = ({
+  onBack,
   onAddAlarm,
-  onNavigateToAlarms,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     storageService.getChatHistory()
@@ -40,6 +41,8 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
   const handleSendMessage = (textToSend?: string) => {
     const text = (textToSend || inputText).trim();
     if (!text) return;
+
+    hapticsService.light();
 
     const userMsg: ChatMessage = {
       id: `msg_user_${Date.now()}`,
@@ -55,39 +58,38 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
     });
     setInputText('');
 
-    // Trigger Thinking -> Structured Response pipeline
     setAssistantState('thinking');
 
     setTimeout(() => {
-      // Analyze text for demo parse
-      let parsedTime = '07:00';
-      let parsedLabel = 'Smart Wake Alarm';
-      let parsedDays = [1, 2, 3, 4, 5];
+      // Analyze text: distinguish alarm requests vs conversational questions
+      const hasAlarmIntent =
+        /\b(alarm|wake|nap|timer|clock|\d{1,2}:\d{2}|\d{1,2}\s*(am|pm))\b/i.test(text);
 
-      const match630 = /6:30/i.test(text);
-      const matchNap = /nap|25/i.test(text);
-      const matchSat = /sat|8:00/i.test(text);
+      let assistantReplyText = '';
+      let parsedAlarmData: Partial<Alarm> | undefined = undefined;
 
-      if (match630) {
-        parsedTime = '06:30';
-        parsedLabel = 'Morning Workout & Briefing';
-        parsedDays = [1, 2, 3, 4, 5];
-      } else if (matchNap) {
-        parsedTime = '14:30';
-        parsedLabel = 'Power Recharge Nap';
-        parsedDays = [];
-      } else if (matchSat) {
-        parsedTime = '08:00';
-        parsedLabel = 'Gentle Weekend Awake';
-        parsedDays = [6];
-      }
+      if (hasAlarmIntent) {
+        let parsedTime = '07:00';
+        let parsedLabel = 'Smart Wake Alarm';
+        let parsedDays = [1, 2, 3, 4, 5];
 
-      const assistantMsg: ChatMessage = {
-        id: `msg_ai_${Date.now()}`,
-        sender: 'assistant',
-        text: `I parsed your command: "${text}". Here is the structured alarm ready to stage:`,
-        timestamp: Date.now(),
-        parsedAlarm: {
+        if (/6:30/i.test(text)) {
+          parsedTime = '06:30';
+          parsedLabel = 'Morning Workout & Briefing';
+          parsedDays = [1, 2, 3, 4, 5];
+        } else if (/20\s*min|nap/i.test(text)) {
+          const future = new Date(Date.now() + 20 * 60000);
+          parsedTime = `${future.getHours().toString().padStart(2, '0')}:${future.getMinutes().toString().padStart(2, '0')}`;
+          parsedLabel = 'Power Recharge Nap';
+          parsedDays = [];
+        } else if (/8:00|sat/i.test(text)) {
+          parsedTime = '08:00';
+          parsedLabel = 'Gentle Weekend Awake';
+          parsedDays = [6];
+        }
+
+        assistantReplyText = `I have parsed your wake request: "${text}". Here is the confirmation card ready to save to your alarms:`;
+        parsedAlarmData = {
           time: parsedTime,
           label: parsedLabel,
           days: parsedDays,
@@ -98,8 +100,20 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
           snoozeIntervalMinutes: 9,
           snoozeLimit: 3,
           aiBriefing: true,
-        },
-        actionSuggested: 'confirm_alarm',
+        };
+      } else {
+        // Conversational non-alarm response!
+        assistantReplyText =
+          "I can help you set recurring alarms, schedule quick power naps, manage your morning wake routine, and configure your daily spoken AI briefing. Just ask me to set an alarm for any time!";
+      }
+
+      const assistantMsg: ChatMessage = {
+        id: `msg_ai_${Date.now()}`,
+        sender: 'assistant',
+        text: assistantReplyText,
+        timestamp: Date.now(),
+        parsedAlarm: parsedAlarmData,
+        actionSuggested: parsedAlarmData ? 'confirm_alarm' : undefined,
       };
 
       setAssistantState('speaking');
@@ -112,24 +126,26 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
 
       setTimeout(() => {
         setAssistantState('idle');
-      }, 2500);
-    }, 1200);
+      }, 2000);
+    }, 1100);
   };
 
   const handleToggleMic = () => {
     if (assistantState === 'idle') {
+      hapticsService.medium();
       setAssistantState('listening');
-      // Simulate listening for 2.5s then send
       setTimeout(() => {
         setAssistantState('idle');
-        handleSendMessage('Set an alarm for 6:30 AM weekdays with AI briefing');
+        handleSendMessage('Wake me at 6:30 on weekdays');
       }, 2500);
     } else {
+      hapticsService.light();
       setAssistantState('idle');
     }
   };
 
   const handleConfirmAlarm = (msgId: string, parsed: Partial<Alarm>) => {
+    hapticsService.success();
     onAddAlarm({
       time: parsed.time || '07:00',
       label: parsed.label || 'AI Scheduled Alarm',
@@ -148,215 +164,176 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
   };
 
   return (
-    <div className="flex h-[calc(100vh-136px)] flex-col justify-between pb-4">
-      {/* State Indicator Banner */}
-      <div className="flex items-center justify-between rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <div
-            className={`h-2.5 w-2.5 rounded-full ${
-              assistantState === 'listening'
-                ? 'bg-rose-500 animate-ping'
-                : assistantState === 'thinking'
-                ? 'bg-amber-400 animate-pulse'
-                : assistantState === 'speaking'
-                ? 'bg-purple-400 animate-pulse'
-                : 'bg-zinc-600'
-            }`}
-          />
-          <span className="text-xs font-semibold text-zinc-300 capitalize">
-            {assistantState === 'idle'
-              ? 'Assistant Ready'
-              : `${assistantState}...`}
-          </span>
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-white text-[#1E1B4B] flex flex-col justify-between">
+      {/* Top Bar with Back Button */}
+      <PageHeader
+        title="AI Assistant"
+        subtitle="Natural language alarm management"
+        onBack={onBack}
+      />
+
+      {/* Main Chat Feed */}
+      <div className="mx-auto w-full max-w-xl px-4 py-3 flex-1 flex flex-col justify-between overflow-hidden">
+        <div className="flex-1 space-y-4 overflow-y-auto pr-1 pb-4">
+          {/* Centered Date Separator */}
+          <div className="flex items-center justify-center my-2">
+            <span className="text-[11px] font-bold text-[#6B7280] bg-[#F3F3F5] px-3 py-1 rounded-full">
+              Today
+            </span>
+          </div>
+
+          {messages.map((msg) => {
+            const isUser = msg.sender === 'user';
+            return (
+              <div
+                key={msg.id}
+                className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
+              >
+                <div
+                  className={`max-w-[85%] sm:max-w-md rounded-[22px] p-4 text-xs sm:text-sm leading-relaxed shadow-xs ${
+                    isUser
+                      ? 'bg-[#3B3D78] text-white rounded-tr-xs'
+                      : 'bg-[#F3F3F5] text-[#1E1B4B] rounded-tl-xs'
+                  }`}
+                >
+                  <p className="font-medium">{msg.text}</p>
+
+                  {/* ONLY show structured alarm confirmation card when parsedAlarm exists! */}
+                  {msg.parsedAlarm && (
+                    <div className="mt-3 rounded-2xl bg-white p-4 shadow-sm border border-gray-100 text-[#1E1B4B]">
+                      <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                        <span className="text-xs font-bold text-[#9C1C7C]">
+                          Structured Alarm
+                        </span>
+                        <span className="font-mono-numbers text-base font-extrabold text-[#9C1C7C]">
+                          {msg.parsedAlarm.time}
+                        </span>
+                      </div>
+
+                      <div className="mt-2 text-xs font-bold text-[#1E1B4B]">
+                        {msg.parsedAlarm.label}
+                      </div>
+
+                      <div className="mt-1 flex items-center gap-2 text-[11px] text-[#6B7280]">
+                        <span>
+                          {msg.parsedAlarm.days && msg.parsedAlarm.days.length > 0
+                            ? 'Weekdays'
+                            : 'One-time'}
+                        </span>
+                        <span>·</span>
+                        <span>{msg.parsedAlarm.aiBriefing ? 'AI Briefing' : 'Standard'}</span>
+                      </div>
+
+                      <div className="mt-3 pt-2 border-t border-gray-100">
+                        {savedSuccessId === msg.id ? (
+                          <div className="flex items-center justify-center gap-1.5 text-xs text-emerald-600 font-bold py-1">
+                            <CheckCircle2 className="h-4 w-4" />
+                            <span>Alarm Saved to Schedule!</span>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleConfirmAlarm(msg.id, msg.parsedAlarm!)}
+                            className="w-full min-h-[42px] rounded-xl bg-[#9C1C7C] hover:bg-[#86176a] py-2 text-xs font-bold text-white transition-colors shadow-sm"
+                          >
+                            Confirm & Save Alarm
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Typing Indicator while thinking */}
+          {assistantState === 'thinking' && (
+            <div className="flex items-center gap-2.5 bg-[#F3F3F5] px-4 py-3 rounded-2xl w-fit">
+              <span className="text-xs font-bold text-[#6B7280]">AI Wake is thinking</span>
+              <div className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-[#9C1C7C] animate-pulse" />
+                <span className="h-2 w-2 rounded-full bg-[#9C1C7C] animate-pulse [animation-delay:200ms]" />
+                <span className="h-2 w-2 rounded-full bg-[#9C1C7C] animate-pulse [animation-delay:400ms]" />
+              </div>
+            </div>
+          )}
+
+          {assistantState === 'listening' && (
+            <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-red-50 border border-red-100">
+              <Mic className="h-5 w-5 text-red-500 animate-pulse" />
+              <div className="flex-1">
+                <span className="text-xs font-bold text-red-600">Listening to voice command...</span>
+                <div className="mt-1 flex items-center gap-1">
+                  {[12, 24, 18, 30, 16, 28, 14].map((h, i) => (
+                    <span
+                      key={i}
+                      style={{ height: `${h}px` }}
+                      className="w-1 bg-red-500 rounded-full animate-bounce"
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* State visual preview switcher for testing the UI states */}
-        <div className="flex items-center gap-1 text-[11px] text-zinc-400">
-          <span className="hidden sm:inline">UI State:</span>
-          {(['idle', 'listening', 'thinking', 'speaking'] as const).map((s) => (
+        {/* Suggestion Chips Above Input */}
+        <div className="pt-2">
+          <div className="flex items-center gap-2 overflow-x-auto pb-2 no-scrollbar">
+            {SUGGESTION_CHIPS.map((chip, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => handleSendMessage(chip)}
+                className="shrink-0 rounded-full bg-[#F3F3F5] hover:bg-gray-200 px-3.5 py-1.5 text-xs font-bold text-[#3B3D78] transition-colors shadow-xs active:scale-95"
+              >
+                {chip}
+              </button>
+            ))}
+          </div>
+
+          {/* Fixed Input Bar at the Bottom */}
+          <div className="flex items-center gap-2 border-t border-gray-100 pt-3 pb-safe">
             <button
-              key={s}
               type="button"
-              onClick={() => setAssistantState(s)}
-              className={`rounded px-1.5 py-0.5 capitalize transition-colors ${
-                assistantState === s
-                  ? 'bg-purple-900/60 text-purple-300 font-semibold'
-                  : 'hover:text-zinc-200'
+              onClick={handleToggleMic}
+              aria-label={assistantState === 'listening' ? 'Stop mic' : 'Start mic'}
+              className={`flex min-h-[48px] min-w-[48px] items-center justify-center rounded-full transition-colors ${
+                assistantState === 'listening'
+                  ? 'bg-red-500 text-white animate-pulse'
+                  : 'bg-[#F3F3F5] text-[#3B3D78] hover:bg-gray-200'
               }`}
             >
-              {s}
+              {assistantState === 'listening' ? (
+                <MicOff className="h-5 w-5" />
+              ) : (
+                <Mic className="h-5 w-5" />
+              )}
             </button>
-          ))}
-        </div>
-      </div>
 
-      {/* Messages Scroll Area */}
-      <div className="mt-4 flex-1 space-y-4 overflow-y-auto pr-1">
-        {/* Phase 1 Architecture Notice */}
-        <div className="rounded-2xl border border-purple-900/40 bg-purple-950/20 p-4">
-          <div className="flex items-start gap-3">
-            <Sparkles className="mt-0.5 h-4 w-4 text-purple-400 shrink-0" />
-            <div className="text-xs text-zinc-300 leading-relaxed">
-              <span className="font-semibold text-purple-300">Phase 1 Architecture Foundation:</span>
-              <p className="mt-1 text-zinc-400">
-                Natural-language parser UI, speech visualizers, and alarm confirmation schemas are fully wired. In Phase 2, live voice input will connect directly to the Gemini 2.0 streaming pipeline and Android SpeechRecognizer.
-              </p>
-            </div>
-          </div>
-        </div>
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSendMessage();
+              }}
+              placeholder="Ask AI: 'Wake me at 6:45 AM tomorrow'..."
+              className="min-h-[48px] flex-1 rounded-full bg-[#F3F3F5] px-4 text-xs sm:text-sm text-[#1E1B4B] placeholder:text-gray-400 focus:bg-white focus:ring-2 focus:ring-[#9C1C7C] focus:outline-none transition-all"
+            />
 
-        {/* Message Bubble Feed */}
-        {messages.map((msg) => {
-          const isUser = msg.sender === 'user';
-          return (
-            <div
-              key={msg.id}
-              className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
+            <button
+              type="button"
+              onClick={() => handleSendMessage()}
+              disabled={!inputText.trim()}
+              aria-label="Send message"
+              className="flex min-h-[48px] min-w-[48px] items-center justify-center rounded-full bg-[#3B3D78] hover:bg-[#2E2F6B] disabled:opacity-40 text-white transition-colors shadow-sm"
             >
-              <div
-                className={`max-w-[85%] sm:max-w-md rounded-2xl p-4 text-xs sm:text-sm leading-relaxed ${
-                  isUser
-                    ? 'bg-purple-600 text-white rounded-tr-sm shadow-md'
-                    : 'bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-tl-sm'
-                }`}
-              >
-                <p>{msg.text}</p>
-
-                {/* Structured Alarm Confirmation Card */}
-                {msg.parsedAlarm && (
-                  <div className="mt-3 rounded-xl border border-zinc-700 bg-zinc-950/80 p-3.5 text-zinc-100">
-                    <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-                      <span className="text-xs font-semibold text-purple-300">
-                        Structured Alarm Card
-                      </span>
-                      <span className="font-mono-numbers text-sm font-bold text-zinc-50">
-                        {msg.parsedAlarm.time}
-                      </span>
-                    </div>
-
-                    <div className="mt-2 text-xs font-medium text-zinc-200">
-                      {msg.parsedAlarm.label}
-                    </div>
-
-                    <div className="mt-1 flex items-center gap-2 text-[11px] text-zinc-400">
-                      <span>
-                        {msg.parsedAlarm.days && msg.parsedAlarm.days.length > 0
-                          ? 'Weekdays'
-                          : 'One-time'}
-                      </span>
-                      <span>·</span>
-                      <span>{msg.parsedAlarm.aiBriefing ? 'AI Briefing enabled' : 'Standard'}</span>
-                    </div>
-
-                    <div className="mt-3 flex items-center gap-2 pt-2 border-t border-zinc-800">
-                      {savedSuccessId === msg.id ? (
-                        <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold py-1">
-                          <CheckCircle2 className="h-4 w-4" />
-                          <span>Alarm Added to List!</span>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleConfirmAlarm(msg.id, msg.parsedAlarm!)}
-                          className="w-full min-h-[38px] rounded-lg bg-purple-600 hover:bg-purple-500 py-1.5 text-xs font-semibold text-white transition-colors"
-                        >
-                          Confirm & Save Alarm
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <span className="mt-1 text-[10px] text-zinc-400 px-1">
-                {new Date(msg.timestamp).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </span>
-            </div>
-          );
-        })}
-
-        {/* Listening / Thinking animation block */}
-        {assistantState === 'listening' && (
-          <div className="flex items-center gap-3 rounded-2xl border border-rose-900/50 bg-rose-950/20 p-4">
-            <Mic className="h-5 w-5 text-rose-400 animate-pulse" />
-            <div className="flex-1">
-              <span className="text-xs font-semibold text-rose-200">Listening to voice command...</span>
-              <div className="mt-1 flex items-center gap-1">
-                {[12, 24, 18, 30, 16, 28, 14].map((h, i) => (
-                  <span
-                    key={i}
-                    style={{ height: `${h}px` }}
-                    className="w-1 bg-rose-400 rounded-full animate-bounce"
-                  />
-                ))}
-              </div>
-            </div>
+              <Send className="h-4 w-4" />
+            </button>
           </div>
-        )}
-
-        {assistantState === 'thinking' && (
-          <div className="flex items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-3 text-xs text-zinc-400">
-            <Sparkles className="h-4 w-4 text-purple-400 animate-spin" />
-            <span>Parsing schedule parameters & intent...</span>
-          </div>
-        )}
-      </div>
-
-      {/* Suggested prompts strip */}
-      <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1 text-xs">
-        {SAMPLE_PROMPTS.map((prompt, idx) => (
-          <button
-            key={idx}
-            type="button"
-            onClick={() => handleSendMessage(prompt)}
-            className="shrink-0 rounded-xl border border-zinc-800 bg-zinc-900/70 px-3 py-1.5 text-zinc-300 hover:border-purple-600/50 hover:text-white transition-colors"
-          >
-            {prompt}
-          </button>
-        ))}
-      </div>
-
-      {/* Input Bar */}
-      <div className="mt-2 flex items-center gap-2 border-t border-zinc-800/80 pt-3">
-        <button
-          type="button"
-          onClick={handleToggleMic}
-          aria-label={assistantState === 'listening' ? 'Stop listening' : 'Start microphone listening'}
-          className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl transition-colors ${
-            assistantState === 'listening'
-              ? 'bg-rose-600 text-white animate-pulse'
-              : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white'
-          }`}
-        >
-          {assistantState === 'listening' ? (
-            <MicOff className="h-5 w-5" />
-          ) : (
-            <Mic className="h-5 w-5" />
-          )}
-        </button>
-
-        <input
-          type="text"
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleSendMessage();
-          }}
-          placeholder="Type an alarm command or routine..."
-          className="min-h-[44px] flex-1 rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-xs sm:text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-purple-500 focus:outline-none"
-        />
-
-        <button
-          type="button"
-          onClick={() => handleSendMessage()}
-          disabled={!inputText.trim()}
-          aria-label="Send message"
-          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white transition-colors"
-        >
-          <Send className="h-4 w-4" />
-        </button>
+        </div>
       </div>
     </div>
   );

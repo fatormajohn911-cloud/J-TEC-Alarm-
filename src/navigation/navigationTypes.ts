@@ -1,7 +1,8 @@
-export type TabType = 'home' | 'assistant' | 'schedule' | 'alarms' | 'settings';
+export type PageType = 'home' | 'alarms' | 'assistant' | 'schedule' | 'settings';
+export type TabType = PageType;
 
 export interface NavigationItem {
-  id: TabType;
+  id: PageType;
   label: string;
   badgeCount?: number;
 }

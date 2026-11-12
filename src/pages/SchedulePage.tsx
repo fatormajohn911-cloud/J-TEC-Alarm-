@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { ScheduleRoutine } from '../types/schedule';
 import { AddRoutineModal } from '../components/schedule/AddRoutineModal';
+import { PageHeader } from '../components/layout/PageHeader';
+import { hapticsService } from '../services/hapticsService';
 import {
   Calendar,
   Plus,
   CheckCircle2,
   Circle,
-  Clock,
   Trash2,
-  Sparkles,
   Sun,
   Briefcase,
   Heart,
@@ -19,6 +20,7 @@ import {
 interface SchedulePageProps {
   routines: ScheduleRoutine[];
   selectedDay: number;
+  onBack: () => void;
   onSelectDay: (day: number) => void;
   onToggleRoutine: (id: string) => void;
   onAddRoutine: (routine: Omit<ScheduleRoutine, 'id'>) => void;
@@ -38,6 +40,7 @@ const DAYS_NAV = [
 export const SchedulePage: React.FC<SchedulePageProps> = ({
   routines,
   selectedDay,
+  onBack,
   onSelectDay,
   onToggleRoutine,
   onAddRoutine,
@@ -51,170 +54,225 @@ export const SchedulePage: React.FC<SchedulePageProps> = ({
 
   const totalMinutes = dayRoutines.reduce((acc, curr) => acc + curr.durationMinutes, 0);
   const completedCount = dayRoutines.filter((r) => r.completed).length;
+  const progressRatio = dayRoutines.length > 0 ? completedCount / dayRoutines.length : 0;
 
-  const getCategoryIcon = (category: string) => {
+  const getCategoryVisual = (category: string) => {
     switch (category) {
       case 'morning_routine':
-        return <Sun className="h-4 w-4 text-amber-400" />;
+        return { icon: Sun, color: 'bg-[#F5B800]/20 text-[#F5B800]' };
       case 'health':
-        return <Heart className="h-4 w-4 text-rose-400" />;
+        return { icon: Heart, color: 'bg-[#9C1C7C]/15 text-[#9C1C7C]' };
       case 'work':
-        return <Briefcase className="h-4 w-4 text-blue-400" />;
+        return { icon: Briefcase, color: 'bg-[#3B3D78]/15 text-[#3B3D78]' };
       case 'evening':
-        return <Moon className="h-4 w-4 text-indigo-400" />;
+        return { icon: Moon, color: 'bg-[#12A6A0]/15 text-[#12A6A0]' };
       default:
-        return <ListTodo className="h-4 w-4 text-purple-400" />;
+        return { icon: ListTodo, color: 'bg-[#F57C1F]/15 text-[#F57C1F]' };
     }
   };
 
   return (
-    <div className="space-y-6 pb-20">
-      {/* 1. Header with Add Action */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-100">
-            Daily Routine Planner
-          </h2>
-          <p className="text-xs text-zinc-400 mt-0.5">
-            Synchronize tasks and protocols with your wake-up rhythm
-          </p>
-        </div>
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-white text-[#1E1B4B] flex flex-col">
+      {/* Top Bar with Back Arrow */}
+      <PageHeader
+        title="Schedule"
+        subtitle={`${dayRoutines.length} routines · ${totalMinutes}m planned`}
+        onBack={onBack}
+        rightAction={
+          <button
+            type="button"
+            onClick={() => {
+              hapticsService.light();
+              setIsAddModalOpen(true);
+            }}
+            className="flex h-10 items-center gap-1 rounded-full bg-white text-[#3B3D78] px-3.5 py-1 text-xs font-bold shadow-sm hover:bg-gray-100 transition-colors"
+          >
+            <Plus className="h-4 w-4 stroke-[2.5]" />
+            <span>Add</span>
+          </button>
+        }
+      />
 
-        <button
-          type="button"
-          onClick={() => setIsAddModalOpen(true)}
-          className="flex min-h-[44px] items-center gap-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 px-3.5 py-2 text-xs font-semibold text-white shadow-md transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Add Routine</span>
-        </button>
-      </div>
-
-      {/* 2. Horizontal Day Selector */}
-      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-2">
-        <div className="grid grid-cols-7 gap-1">
-          {DAYS_NAV.map((item) => {
-            const isSelected = selectedDay === item.dayIndex;
-            return (
-              <button
-                key={item.dayIndex}
-                type="button"
-                onClick={() => onSelectDay(item.dayIndex)}
-                className={`flex min-h-[48px] flex-col items-center justify-center rounded-xl transition-all ${
-                  isSelected
-                    ? 'bg-purple-600 text-white shadow-md font-bold'
-                    : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 font-medium'
-                }`}
-              >
-                <span className="text-[11px] uppercase tracking-wider">{item.label}</span>
-                <span className="text-sm font-mono-numbers">{item.short}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 3. Daily Summary Stats (Zero-Pill Compliance) */}
-      <div className="flex items-center justify-between text-xs text-zinc-400 border-b border-zinc-800/80 pb-3">
-        <div className="flex items-center gap-2">
-          <span>{dayRoutines.length} Planned Events</span>
-          <span aria-hidden="true">·</span>
-          <span>{totalMinutes} Total Minutes</span>
-        </div>
-        <div>
-          <span className="text-purple-300 font-medium font-mono-numbers">
-            {completedCount} of {dayRoutines.length} Completed
-          </span>
-        </div>
-      </div>
-
-      {/* 4. Routine Timeline List */}
-      <div className="space-y-3">
-        {dayRoutines.length > 0 ? (
-          dayRoutines.map((routine) => (
-            <div
-              key={routine.id}
-              className={`flex items-start justify-between rounded-2xl border p-4 transition-all ${
-                routine.completed
-                  ? 'border-zinc-800 bg-zinc-950/40 opacity-70'
-                  : 'border-zinc-800/90 bg-zinc-900/80 hover:border-zinc-700 shadow-sm'
-              }`}
-            >
-              <div className="flex items-start gap-3.5">
+      <div className="mx-auto w-full max-w-xl px-4 py-5 space-y-4 flex-1">
+        {/* Horizontal Day Selector */}
+        <div className="rounded-[24px] bg-[#F3F3F5] p-2">
+          <div className="grid grid-cols-7 gap-1">
+            {DAYS_NAV.map((item) => {
+              const isSelected = selectedDay === item.dayIndex;
+              return (
                 <button
+                  key={item.dayIndex}
                   type="button"
-                  onClick={() => onToggleRoutine(routine.id)}
-                  aria-label={`Toggle completion of ${routine.title}`}
-                  className="mt-0.5 min-h-[36px] min-w-[36px] flex items-center justify-center text-zinc-500 hover:text-purple-400"
+                  onClick={() => {
+                    hapticsService.selection();
+                    onSelectDay(item.dayIndex);
+                  }}
+                  className={`flex min-h-[50px] flex-col items-center justify-center rounded-2xl transition-all ${
+                    isSelected
+                      ? 'bg-[#3B3D78] text-white shadow-md font-bold scale-102'
+                      : 'text-[#6B7280] hover:text-[#1E1B4B] font-semibold'
+                  }`}
                 >
-                  {routine.completed ? (
-                    <CheckCircle2 className="h-5 w-5 text-emerald-400" />
-                  ) : (
-                    <Circle className="h-5 w-5 text-zinc-600" />
-                  )}
+                  <span className="text-[10px] uppercase tracking-wider">{item.label}</span>
+                  <span className="text-sm font-mono-numbers">{item.short}</span>
                 </button>
+              );
+            })}
+          </div>
+        </div>
 
-                <div>
-                  <div className="flex items-center gap-2">
-                    {getCategoryIcon(routine.category)}
-                    <h3
-                      className={`text-sm font-semibold ${
-                        routine.completed ? 'line-through text-zinc-400' : 'text-zinc-100'
-                      }`}
+        {/* Progress & Summary Bar with SVG Circular Ring & Normal Font Done Count */}
+        <div className="flex items-center justify-between p-4 rounded-[24px] bg-[#F3F3F5] border border-gray-100">
+          <div className="flex items-center gap-3">
+            {/* SVG Progress Ring */}
+            <div className="relative h-10 w-10 flex items-center justify-center">
+              <svg className="h-10 w-10 transform -rotate-90" viewBox="0 0 36 36">
+                <circle
+                  cx="18"
+                  cy="18"
+                  r="14"
+                  fill="none"
+                  className="stroke-gray-300"
+                  strokeWidth="3.5"
+                />
+                <circle
+                  cx="18"
+                  cy="18"
+                  r="14"
+                  fill="none"
+                  className="stroke-[#9C1C7C] transition-all duration-300"
+                  strokeWidth="3.5"
+                  strokeDasharray={`${progressRatio * 88} 88`}
+                  strokeLinecap="round"
+                />
+              </svg>
+              <span className="absolute text-[10px] font-bold text-[#1E1B4B] font-sans">
+                {Math.round(progressRatio * 100)}%
+              </span>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-bold text-[#1E1B4B]">Daily Wake Protocol</h3>
+              <p className="text-[11px] text-[#6B7280]">
+                {dayRoutines.length} items planned today
+              </p>
+            </div>
+          </div>
+
+          <div className="text-right">
+            {/* Normal font, NOT monospace */}
+            <span className="text-xs font-extrabold text-[#9C1C7C] font-sans">
+              {completedCount} of {dayRoutines.length} done
+            </span>
+          </div>
+        </div>
+
+        {/* Routine Timeline List */}
+        <div className="space-y-3 pb-24">
+          {dayRoutines.length > 0 ? (
+            dayRoutines.map((routine) => {
+              const { icon: CatIcon, color: catColor } = getCategoryVisual(routine.category);
+              return (
+                <div
+                  key={routine.id}
+                  onClick={() => {
+                    hapticsService.light();
+                    onToggleRoutine(routine.id);
+                  }}
+                  className={`flex cursor-pointer items-start justify-between rounded-[24px] border p-4 transition-all ${
+                    routine.completed
+                      ? 'border-gray-100 bg-[#F9FAFB] opacity-65'
+                      : 'border-gray-100 bg-white shadow-[0_4px_16px_rgba(30,27,75,0.05)] hover:border-gray-200'
+                  }`}
+                >
+                  <div className="flex items-start gap-3.5">
+                    {/* Completion Checkmark */}
+                    <button
+                      type="button"
+                      aria-label={`Toggle completion of ${routine.title}`}
+                      className="mt-1 flex h-6 w-6 items-center justify-center text-gray-400 hover:text-[#9C1C7C] transition-colors"
                     >
-                      {routine.title}
-                    </h3>
+                      {routine.completed ? (
+                        <CheckCircle2 className="h-6 w-6 text-emerald-500 fill-emerald-50" />
+                      ) : (
+                        <Circle className="h-6 w-6 text-gray-300" />
+                      )}
+                    </button>
+
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`flex h-6 w-6 items-center justify-center rounded-lg ${catColor}`}
+                        >
+                          <CatIcon className="h-3.5 w-3.5" />
+                        </div>
+                        <h3
+                          className={`text-sm font-bold ${
+                            routine.completed ? 'line-through text-[#6B7280]' : 'text-[#1E1B4B]'
+                          }`}
+                        >
+                          {routine.title}
+                        </h3>
+                      </div>
+
+                      {routine.notes && (
+                        <p className="mt-1 text-xs text-[#6B7280] max-w-sm">
+                          {routine.notes}
+                        </p>
+                      )}
+
+                      <div className="mt-2 flex items-center gap-2 text-xs font-medium text-[#6B7280]">
+                        <span className="font-mono-numbers font-bold text-[#9C1C7C]">
+                          {routine.time}
+                        </span>
+                        <span>·</span>
+                        <span>{routine.durationMinutes} min</span>
+                        <span>·</span>
+                        <span className="capitalize">{routine.category.replace('_', ' ')}</span>
+                      </div>
+                    </div>
                   </div>
 
-                  {routine.notes && (
-                    <p className="mt-1 text-xs text-zinc-400 max-w-sm sm:max-w-md">
-                      {routine.notes}
-                    </p>
-                  )}
-
-                  {/* Clean unboxed metadata with separators */}
-                  <div className="mt-2 flex items-center gap-2 text-xs text-zinc-400">
-                    <span className="font-mono-numbers font-medium">{routine.time}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>{routine.durationMinutes} min</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="capitalize">{routine.category.replace('_', ' ')}</span>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      hapticsService.medium();
+                      onDeleteRoutine(routine.id);
+                    }}
+                    aria-label="Delete routine"
+                    className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 </div>
+              );
+            })
+          ) : (
+            <div className="flex flex-col items-center justify-center rounded-[28px] border-2 border-dashed border-gray-200 p-12 text-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#12A6A0]/10 text-[#12A6A0] mb-3">
+                <Calendar className="h-8 w-8 stroke-[2]" />
               </div>
-
+              <h3 className="text-base font-bold text-[#1E1B4B]">No routines for this day</h3>
+              <p className="mt-1 text-xs text-[#6B7280] max-w-xs">
+                Establish morning routines or link habits to your wake-up time.
+              </p>
               <button
                 type="button"
-                onClick={() => onDeleteRoutine(routine.id)}
-                aria-label="Delete routine"
-                className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-950/20 transition-colors"
+                onClick={() => {
+                  hapticsService.light();
+                  setIsAddModalOpen(true);
+                }}
+                className="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-2xl bg-[#3B3D78] hover:bg-[#2E2F6B] px-5 text-xs font-bold text-white shadow-md transition-colors"
               >
-                <Trash2 className="h-4 w-4" />
+                <Plus className="h-4 w-4" />
+                <span>Add First Routine</span>
               </button>
             </div>
-          ))
-        ) : (
-          <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-zinc-800 p-10 text-center">
-            <Calendar className="h-10 w-10 text-zinc-600 mb-3" />
-            <h3 className="text-sm font-semibold text-zinc-300">
-              No routines scheduled for this day
-            </h3>
-            <p className="mt-1 text-xs text-zinc-400 max-w-xs">
-              Establish a morning routine or link health habits to your waking schedule.
-            </p>
-            <button
-              type="button"
-              onClick={() => setIsAddModalOpen(true)}
-              className="mt-4 inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 px-4 text-xs font-semibold text-white shadow-md transition-colors"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Add First Routine</span>
-            </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* Routine Dialog Modal */}
       <AddRoutineModal
         isOpen={isAddModalOpen}
         selectedDay={selectedDay}

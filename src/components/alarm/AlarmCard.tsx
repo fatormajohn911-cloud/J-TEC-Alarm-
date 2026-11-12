@@ -1,7 +1,8 @@
 import React from 'react';
 import { Alarm } from '../../types/alarm';
 import { ToggleSwitch } from '../common/ToggleSwitch';
-import { Edit2, Trash2, Volume2, Sparkles, Play, BellRing } from 'lucide-react';
+import { Edit2, Trash2, Volume2, BellRing, AlarmClock } from 'lucide-react';
+import { AiIcon } from '../common/AiIcon';
 
 interface AlarmCardProps {
   alarm: Alarm;
@@ -31,32 +32,43 @@ export const AlarmCard: React.FC<AlarmCardProps> = ({
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl border transition-all duration-200 ${
+      className={`relative overflow-hidden rounded-[24px] border transition-all duration-200 ${
         alarm.enabled
-          ? 'bg-zinc-900/90 border-zinc-700/80 shadow-lg shadow-purple-950/10'
-          : 'bg-zinc-900/40 border-zinc-800/60 opacity-75'
+          ? 'bg-white border-gray-100 shadow-[0_4px_20px_rgba(30,27,75,0.06)]'
+          : 'bg-[#F9FAFB] border-gray-100 opacity-70'
       }`}
     >
-      <div className="p-5">
+      <div className="p-4 sm:p-5">
         {/* Top row: Time + Toggle Switch */}
         <div className="flex items-start justify-between gap-4">
-          <div className="flex items-baseline gap-2">
-            <span
-              className={`font-mono-numbers text-3xl sm:text-4xl font-bold tracking-tight ${
-                alarm.enabled ? 'text-zinc-50' : 'text-zinc-400'
+          <div className="flex items-center gap-3">
+            <div
+              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full ${
+                alarm.enabled ? 'bg-[#9C1C7C]/15 text-[#9C1C7C]' : 'bg-gray-100 text-gray-400'
               }`}
             >
-              {displayHours}:{mStr}
-            </span>
-            {!timeFormat24h && (
-              <span
-                className={`text-xs sm:text-sm font-semibold tracking-wider ${
-                  alarm.enabled ? 'text-purple-400' : 'text-zinc-400'
-                }`}
-              >
-                {period}
-              </span>
-            )}
+              <AlarmClock className="h-6 w-6 stroke-[2]" />
+            </div>
+
+            <div>
+              <div className="flex items-baseline gap-1.5">
+                <span
+                  className={`font-mono-numbers text-2xl sm:text-3xl font-extrabold tracking-tight ${
+                    alarm.enabled ? 'text-[#9C1C7C]' : 'text-[#6B7280]'
+                  }`}
+                >
+                  {displayHours}:{mStr}
+                </span>
+                {!timeFormat24h && (
+                  <span className="text-xs font-bold uppercase tracking-wider text-[#9C1C7C]">
+                    {period}
+                  </span>
+                )}
+              </div>
+              <h3 className="text-sm font-bold text-[#1E1B4B] truncate max-w-[160px] sm:max-w-xs mt-0.5">
+                {alarm.label || 'Alarm'}
+              </h3>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -68,33 +80,22 @@ export const AlarmCard: React.FC<AlarmCardProps> = ({
           </div>
         </div>
 
-        {/* Middle row: Label */}
-        <div className="mt-2">
-          <h3
-            className={`text-sm sm:text-base font-semibold truncate ${
-              alarm.enabled ? 'text-zinc-200' : 'text-zinc-400'
-            }`}
-          >
-            {alarm.label || 'Alarm'}
-          </h3>
-        </div>
-
         {/* Repeat Days Row */}
-        <div className="mt-3 flex items-center gap-1.5 sm:gap-2">
+        <div className="mt-4 flex items-center gap-1.5">
           {isOneTime ? (
-            <span className="text-xs text-zinc-400 font-medium">Plays once</span>
+            <span className="text-xs text-[#6B7280] font-medium">Plays once</span>
           ) : (
             DAYS_SHORT.map((dayLabel, index) => {
               const isSelected = alarm.days.includes(index);
               return (
                 <span
                   key={index}
-                  className={`flex h-6 w-6 items-center justify-center rounded-md text-[11px] font-semibold transition-colors ${
+                  className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold transition-colors ${
                     isSelected
                       ? alarm.enabled
-                        ? 'bg-purple-950/80 text-purple-300 border border-purple-800/60'
-                        : 'bg-zinc-800 text-zinc-400'
-                      : 'text-zinc-600'
+                        ? 'bg-[#3B3D78] text-white shadow-xs'
+                        : 'bg-gray-200 text-gray-500'
+                      : 'text-gray-400 bg-gray-50'
                   }`}
                 >
                   {dayLabel}
@@ -104,36 +105,34 @@ export const AlarmCard: React.FC<AlarmCardProps> = ({
           )}
         </div>
 
-        {/* Bottom Unboxed Metadata (Zero-Pill Compliance) */}
-        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-400 border-t border-zinc-800/80 pt-3">
-          <div className="flex items-center gap-1">
-            <Volume2 className="h-3.5 w-3.5 text-zinc-400" />
-            <span>Vol {alarm.volume}%</span>
+        {/* Bottom Unboxed Metadata & Action Buttons */}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3 text-xs text-[#6B7280]">
+          <div className="flex items-center gap-2 font-medium">
+            <span className="flex items-center gap-1">
+              <Volume2 className="h-3.5 w-3.5 text-gray-400" />
+              {alarm.volume}%
+            </span>
+            <span>·</span>
+            <span>Snooze {alarm.snoozeIntervalMinutes}m</span>
+            {alarm.aiBriefing && (
+              <>
+                <span>·</span>
+                <span className="flex items-center gap-1 text-[#9C1C7C] font-semibold">
+                  <AiIcon className="h-3.5 w-3.5" />
+                  AI Briefing
+                </span>
+              </>
+            )}
           </div>
 
-          <span aria-hidden="true">·</span>
-          <span>Snooze {alarm.snoozeIntervalMinutes}m</span>
-
-          {alarm.aiBriefing && (
-            <>
-              <span aria-hidden="true">·</span>
-              <div className="flex items-center gap-1 text-purple-300">
-                <Sparkles className="h-3.5 w-3.5 text-purple-400" />
-                <span>AI Briefing</span>
-              </div>
-            </>
-          )}
-
-          {/* Action buttons on the right */}
-          <div className="ml-auto flex items-center gap-1 pt-1 sm:pt-0">
+          <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => onTestRing(alarm)}
-              title="Test Ring this alarm"
-              aria-label="Test Ring this alarm"
-              className="flex min-h-[36px] items-center gap-1 rounded-lg px-2 text-xs font-medium text-purple-400 hover:text-purple-300 hover:bg-purple-950/40 transition-colors"
+              title="Test Ring"
+              className="flex min-h-[36px] items-center gap-1 rounded-xl bg-[#F3F3F5] hover:bg-gray-200 px-2.5 py-1 text-xs font-bold text-[#3B3D78] transition-colors"
             >
-              <BellRing className="h-3.5 w-3.5" />
+              <BellRing className="h-3.5 w-3.5 text-[#9C1C7C]" />
               <span>Test</span>
             </button>
 
@@ -141,18 +140,18 @@ export const AlarmCard: React.FC<AlarmCardProps> = ({
               type="button"
               onClick={() => onEdit(alarm)}
               aria-label="Edit alarm"
-              className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors"
+              className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-xl text-gray-500 hover:text-[#1E1B4B] hover:bg-gray-100 transition-colors"
             >
-              <Edit2 className="h-3.5 w-3.5" />
+              <Edit2 className="h-4 w-4" />
             </button>
 
             <button
               type="button"
               onClick={() => onDelete(alarm.id)}
               aria-label="Delete alarm"
-              className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-950/30 transition-colors"
+              className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className="h-4 w-4" />
             </button>
           </div>
         </div>

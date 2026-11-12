@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, useMotionValue, useTransform } from 'motion/react';
 import { Alarm } from '../types/alarm';
 import { alarmAudio } from '../services/nativeAlarmPlugin';
-import { Sparkles, BellOff, Clock, Volume2, ArrowLeft } from 'lucide-react';
+import { hapticsService } from '../services/hapticsService';
+import { BellOff, Clock, Volume2, ArrowRight } from 'lucide-react';
+import { AiIcon } from '../components/common/AiIcon';
 
 interface AlarmRingingScreenProps {
   alarm: Alarm;
@@ -15,11 +18,22 @@ export const AlarmRingingScreen: React.FC<AlarmRingingScreenProps> = ({
   onSnooze,
 }) => {
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
-  const [snoozeSecondsLeft, setSnoozeSecondsLeft] = useState<number | null>(null);
   const [briefingStep, setBriefingStep] = useState(0);
 
+  // Slide to dismiss motion value
+  const dragX = useMotionValue(0);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [maxDragDistance, setMaxDragDistance] = useState(240);
+
   useEffect(() => {
-    // Start peaceful ringtone loop using Web Audio API
+    if (trackRef.current) {
+      setMaxDragDistance(trackRef.current.offsetWidth - 64);
+    }
+  }, []);
+
+  const sliderOpacity = useTransform(dragX, [0, maxDragDistance], [1, 0.2]);
+
+  useEffect(() => {
     alarmAudio.startAlarmLoop(alarm.soundId, alarm.volume);
 
     const clockTimer = setInterval(() => {
@@ -38,11 +52,13 @@ export const AlarmRingingScreen: React.FC<AlarmRingingScreenProps> = ({
   }, [alarm.soundId, alarm.volume]);
 
   const handleSnooze = () => {
+    hapticsService.medium();
     alarmAudio.stopAlarmLoop();
     onSnooze(alarm.snoozeIntervalMinutes);
   };
 
   const handleDismiss = () => {
+    hapticsService.success();
     alarmAudio.stopAlarmLoop();
     onDismiss();
   };
@@ -52,105 +68,124 @@ export const AlarmRingingScreen: React.FC<AlarmRingingScreenProps> = ({
   const seconds = currentTime.getSeconds().toString().padStart(2, '0');
 
   const briefingLines = [
-    "Good morning. It is time to begin your day with intention and clarity.",
-    "Today's forecast: 18°C, calm morning breeze, clean sunrise.",
+    "Good morning. It is time to begin your day with clarity and intention.",
+    "Today's forecast: 18°C, calm morning breeze, clear sunrise.",
     "First routine at 07:00 AM: Hydration & Sunlight Protocol.",
-    "Your schedule is organized. Have a focused and productive day ahead.",
+    "All alarms and schedule items synchronized. Have a wonderful day.",
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-between bg-zinc-950 p-6 sm:p-10 select-none overflow-hidden">
+    <div className="fixed inset-0 z-50 flex flex-col justify-between bg-gradient-to-b from-[#1E1B4B] via-[#2E2F6B] to-[#1E1B4B] text-white p-6 sm:p-10 select-none overflow-hidden pt-safe pb-safe">
       {/* Background ambient pulsing radial glow */}
       <div
-        className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-40"
+        className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-30"
         aria-hidden="true"
       >
-        <div className="h-[500px] w-[500px] rounded-full bg-purple-600/20 blur-[120px] animate-pulse" />
+        <div className="h-[460px] w-[460px] rounded-full bg-[#9C1C7C]/40 blur-[130px] animate-pulse" />
       </div>
 
-      {/* Top Bar: Return to App test control & Status */}
+      {/* Top Status */}
       <div className="relative z-10 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={handleDismiss}
-          className="flex min-h-[44px] items-center gap-2 rounded-xl bg-zinc-900/80 px-3.5 py-2 text-xs font-medium text-zinc-300 hover:text-white border border-zinc-800 transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          <span>Exit Ringing Mode</span>
-        </button>
-
-        <div className="flex items-center gap-2 text-xs text-purple-300 bg-purple-950/60 border border-purple-800/40 px-3 py-1.5 rounded-full">
+        <div className="flex items-center gap-2 text-xs font-bold text-[#9C1C7C] bg-white px-3.5 py-1.5 rounded-full shadow-md">
           <Volume2 className="h-3.5 w-3.5 animate-bounce" />
           <span>Alarm Active</span>
         </div>
+
+        <span className="text-xs font-semibold text-purple-200 uppercase tracking-widest">
+          AI Wake
+        </span>
       </div>
 
-      {/* Center Hero Section */}
+      {/* Center Hero Clock & Label */}
       <div className="relative z-10 flex flex-col items-center justify-center text-center my-auto">
-        {/* Alarm Label */}
-        <span className="text-xs sm:text-sm font-semibold uppercase tracking-widest text-purple-400">
+        <span className="text-xs sm:text-sm font-bold uppercase tracking-widest text-purple-200">
           {alarm.label || 'Wake Up Alarm'}
         </span>
 
-        {/* Massive Glowing Digital Clock */}
+        {/* Huge Time */}
         <div className="mt-2 flex items-baseline justify-center font-mono-numbers">
-          <span className="text-7xl sm:text-8xl md:text-9xl font-bold tracking-tighter text-white drop-shadow-[0_4px_30px_rgba(168,85,247,0.3)]">
+          <span className="text-7xl sm:text-8xl md:text-9xl font-extrabold tracking-tight text-white drop-shadow-[0_4px_30px_rgba(156,28,124,0.35)]">
             {hours}:{minutes}
           </span>
-          <span className="ml-3 text-2xl sm:text-3xl text-zinc-400 font-mono-numbers">
+          <span className="ml-3 text-2xl sm:text-3xl text-purple-200 font-mono-numbers font-medium">
             :{seconds}
           </span>
         </div>
 
-        {/* Animated Sound-Wave Frequency Bars */}
-        <div className="mt-8 flex items-center justify-center gap-1.5 h-14" aria-label="Audio Visualizer">
+        {/* Subtle Multi-Bar Soundwave Pulse */}
+        <div className="mt-8 flex items-center justify-center gap-1.5 h-12" aria-label="Audio Wave">
           {[16, 28, 48, 36, 56, 42, 60, 32, 50, 24, 40, 20].map((height, i) => (
             <div
               key={i}
               style={{
                 height: `${height}px`,
-                animationDelay: `${i * 120}ms`,
-                animationDuration: '1.4s',
+                animationDelay: `${i * 110}ms`,
+                animationDuration: '1.2s',
               }}
-              className="w-1.5 sm:w-2 rounded-full bg-gradient-to-t from-purple-600 to-violet-300 animate-pulse"
+              className="w-1.5 sm:w-2 rounded-full bg-gradient-to-t from-[#9C1C7C] via-[#B0207F] to-[#12A6A0] animate-pulse"
             />
           ))}
         </div>
 
-        {/* AI Voice Message Area */}
+        {/* AI Briefing Speech Area */}
         {alarm.aiBriefing && (
-          <div className="mt-8 max-w-md rounded-2xl border border-purple-900/60 bg-zinc-900/80 p-4 shadow-xl backdrop-blur-md">
-            <div className="flex items-center gap-2 text-xs font-semibold text-purple-300">
-              <Sparkles className="h-4 w-4 text-purple-400 animate-spin" />
+          <div className="mt-8 max-w-md rounded-[28px] bg-white/10 border border-white/20 p-5 shadow-2xl backdrop-blur-md">
+            <div className="flex items-center gap-2 text-xs font-bold text-[#F5B800]">
+              <AiIcon className="h-4 w-4 animate-pulse" />
               <span>AI Wake Morning Intelligence</span>
             </div>
-            <p className="mt-2 text-xs sm:text-sm text-zinc-200 leading-relaxed min-h-[48px]">
+            <p className="mt-2 text-xs sm:text-sm text-white/95 leading-relaxed min-h-[44px]">
               "{briefingLines[briefingStep]}"
             </p>
           </div>
         )}
       </div>
 
-      {/* Bottom Controls: Snooze and Dismiss */}
-      <div className="relative z-10 mx-auto w-full max-w-md space-y-3 pb-safe">
-        {/* Dismiss Button */}
-        <button
-          type="button"
-          onClick={handleDismiss}
-          className="w-full min-h-[56px] rounded-2xl bg-zinc-100 hover:bg-white text-zinc-950 font-bold text-base flex items-center justify-center gap-2 shadow-2xl transition-all active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+      {/* Bottom Controls: SLIDE-TO-DISMISS + BIG SNOOZE */}
+      <div className="relative z-10 mx-auto w-full max-w-md space-y-3.5 pb-2">
+        {/* Slide-to-Dismiss Track */}
+        <div
+          ref={trackRef}
+          className="relative h-16 w-full rounded-full bg-white/20 backdrop-blur-md border border-white/20 p-1 flex items-center overflow-hidden"
         >
-          <BellOff className="h-5 w-5" />
-          <span>Dismiss Alarm</span>
-        </button>
+          {/* Centered Guide Text */}
+          <motion.div
+            style={{ opacity: sliderOpacity }}
+            className="absolute inset-0 flex items-center justify-center pointer-events-none"
+          >
+            <span className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-white">
+              Slide to dismiss →
+            </span>
+          </motion.div>
 
-        {/* Snooze Button */}
+          {/* Draggable Knob */}
+          <motion.div
+            drag="x"
+            dragConstraints={{ left: 0, right: maxDragDistance }}
+            dragElastic={0.08}
+            dragSnapToOrigin={false}
+            style={{ x: dragX }}
+            onDragEnd={(_, info) => {
+              if (info.offset.x > maxDragDistance * 0.7) {
+                handleDismiss();
+              } else {
+                dragX.set(0);
+              }
+            }}
+            className="flex h-14 w-14 cursor-grab active:cursor-grabbing items-center justify-center rounded-full bg-white text-[#1E1B4B] shadow-xl"
+          >
+            <ArrowRight className="h-6 w-6 text-[#9C1C7C] stroke-[2.5]" />
+          </motion.div>
+        </div>
+
+        {/* Big Snooze Button */}
         <button
           type="button"
           onClick={handleSnooze}
-          className="w-full min-h-[48px] rounded-xl border border-zinc-800 bg-zinc-900/80 hover:bg-zinc-800/80 text-zinc-300 font-medium text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+          className="w-full min-h-[52px] rounded-2xl bg-white/15 hover:bg-white/25 active:scale-98 text-white font-bold text-sm flex items-center justify-center gap-2 transition-all backdrop-blur-md border border-white/20"
         >
-          <Clock className="h-4 w-4 text-purple-400" />
-          <span>Snooze for {alarm.snoozeIntervalMinutes} Minutes</span>
+          <Clock className="h-4 w-4 text-[#F5B800]" />
+          <span>Snooze for {alarm.snoozeIntervalMinutes} min</span>
         </button>
       </div>
     </div>

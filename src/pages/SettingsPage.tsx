@@ -2,350 +2,496 @@ import React, { useState } from 'react';
 import { AppSettings } from '../types/settings';
 import { ToggleSwitch } from '../components/common/ToggleSwitch';
 import { alarmAudio, NativeAlarm } from '../services/nativeAlarmPlugin';
+import { PageHeader } from '../components/layout/PageHeader';
+import { hapticsService } from '../services/hapticsService';
 import {
   Sliders,
   Volume2,
-  Bell,
   ShieldCheck,
-  Sparkles,
-  Database,
-  Smartphone,
   Play,
   CheckCircle2,
-  AlertTriangle,
+  AlertCircle,
   RotateCcw,
+  Info,
+  Star,
+  MessageSquare,
+  ShieldAlert,
+  X,
 } from 'lucide-react';
+import { AiIcon } from '../components/common/AiIcon';
 
 interface SettingsPageProps {
   settings: AppSettings;
+  onBack: () => void;
   onUpdateSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
   onResetAll: () => void;
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({
   settings,
+  onBack,
   onUpdateSetting,
   onResetAll,
 }) => {
   const [testingVoice, setTestingVoice] = useState(false);
-  const [permissionSuccessMessage, setPermissionSuccessMessage] = useState<string | null>(null);
+  const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
+  const [activeModal, setActiveModal] = useState<'privacy' | 'rate' | 'feedback' | null>(null);
 
   const handleTestVoiceTone = () => {
+    hapticsService.light();
     setTestingVoice(true);
     alarmAudio.playTone('aurora', 80);
     setTimeout(() => setTestingVoice(false), 2400);
   };
 
   const handleRequestExactAlarm = async () => {
+    hapticsService.light();
     const res = await NativeAlarm.requestExactAlarm();
     onUpdateSetting('exactAlarmPermission', res.granted);
-    setPermissionSuccessMessage('Exact alarm scheduling verified.');
-    setTimeout(() => setPermissionSuccessMessage(null), 3000);
+    setFeedbackSuccess('Exact alarm permission verified.');
+    setTimeout(() => setFeedbackSuccess(null), 3000);
   };
 
   const handleRequestBatteryExemption = async () => {
+    hapticsService.light();
     const res = await NativeAlarm.requestBatteryExempt();
     onUpdateSetting('batteryOptimizationExempt', res.granted);
-    setPermissionSuccessMessage('Battery optimization exemption verified.');
-    setTimeout(() => setPermissionSuccessMessage(null), 3000);
+    setFeedbackSuccess('Battery optimization exemption verified.');
+    setTimeout(() => setFeedbackSuccess(null), 3000);
   };
 
   return (
-    <div className="space-y-6 pb-24">
-      {/* Page Header */}
-      <div>
-        <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-100">
-          Settings & Reliability
-        </h2>
-        <p className="text-xs text-zinc-400 mt-0.5">
-          Configure clock display, AI voice briefings, and Android system permissions
-        </p>
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-white text-[#1E1B4B] flex flex-col">
+      {/* Top Bar with Back Arrow */}
+      <PageHeader
+        title="Settings"
+        subtitle="Preferences & Reliability"
+        onBack={onBack}
+      />
+
+      <div className="mx-auto w-full max-w-xl px-4 py-5 space-y-5 flex-1 pb-28">
+        {feedbackSuccess && (
+          <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-800 font-bold">
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+            <span>{feedbackSuccess}</span>
+          </div>
+        )}
+
+        {/* 1. CLOCK SECTION */}
+        <section className="rounded-[28px] bg-white border border-gray-100 p-5 shadow-[0_4px_20px_rgba(30,27,75,0.04)]">
+          <div className="flex items-center gap-2.5 pb-3 border-b border-gray-100">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#3B3D78]/10 text-[#3B3D78]">
+              <Sliders className="h-4 w-4" />
+            </div>
+            <h3 className="text-sm font-bold text-[#1E1B4B]">Clock</h3>
+          </div>
+
+          <div className="mt-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs sm:text-sm font-bold text-[#1E1B4B]">
+                  24-Hour Format
+                </span>
+                <p className="text-[11px] text-[#6B7280]">
+                  Display 14:00 instead of 02:00 PM
+                </p>
+              </div>
+              <ToggleSwitch
+                checked={settings.timeFormat24h}
+                onChange={(val) => {
+                  hapticsService.light();
+                  onUpdateSetting('timeFormat24h', val);
+                }}
+                label="24-Hour Time Format"
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs sm:text-sm font-bold text-[#1E1B4B]">
+                  Show Live Seconds
+                </span>
+                <p className="text-[11px] text-[#6B7280]">
+                  Real-time seconds counter on main clocks
+                </p>
+              </div>
+              <ToggleSwitch
+                checked={settings.showSeconds}
+                onChange={(val) => {
+                  hapticsService.light();
+                  onUpdateSetting('showSeconds', val);
+                }}
+                label="Show Live Seconds"
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* 2. AI VOICE SECTION (Title never wraps awkwardly) */}
+        <section className="rounded-[28px] bg-white border border-gray-100 p-5 shadow-[0_4px_20px_rgba(30,27,75,0.04)]">
+          <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#9C1C7C]/10 text-[#9C1C7C]">
+                <Volume2 className="h-4 w-4" />
+              </div>
+              <h3 className="text-sm font-bold text-[#1E1B4B]">AI Voice</h3>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleTestVoiceTone}
+              className="flex min-h-[36px] items-center gap-1.5 rounded-full bg-[#F3F3F5] hover:bg-gray-200 px-3.5 py-1 text-xs font-bold text-[#3B3D78] transition-colors"
+            >
+              <Play className="h-3 w-3 fill-current text-[#9C1C7C]" />
+              <span>{testingVoice ? 'Playing...' : 'Test Tone'}</span>
+            </button>
+          </div>
+
+          <div className="mt-4 space-y-4">
+            <div>
+              <label className="text-xs font-bold text-[#1E1B4B] block mb-2">Voice Style</label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {[
+                  { id: 'warm', label: 'Warm & Serene', desc: 'Comforting, gentle wake' },
+                  { id: 'coach', label: 'Morning Coach', desc: 'Energizing motivation' },
+                  { id: 'executive', label: 'Executive', desc: 'Crisp agenda briefing' },
+                ].map((style) => (
+                  <button
+                    key={style.id}
+                    type="button"
+                    onClick={() => {
+                      hapticsService.light();
+                      onUpdateSetting('aiVoiceStyle', style.id as any);
+                    }}
+                    className={`flex flex-col items-start p-3 rounded-2xl text-left transition-all ${
+                      settings.aiVoiceStyle === style.id
+                        ? 'border-2 border-[#9C1C7C] bg-[#9C1C7C]/5'
+                        : 'border border-gray-100 bg-[#F3F3F5] hover:bg-gray-200'
+                    }`}
+                  >
+                    <span className="text-xs font-bold text-[#1E1B4B]">{style.label}</span>
+                    <span className="text-[11px] text-[#6B7280] mt-0.5">{style.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-[#1E1B4B]">Speech Speed</span>
+                <span className="font-mono-numbers font-bold text-[#9C1C7C]">
+                  {settings.speechRate.toFixed(1)}x
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0.8"
+                max="1.2"
+                step="0.1"
+                value={settings.speechRate}
+                onChange={(e) => onUpdateSetting('speechRate', parseFloat(e.target.value))}
+                className="mt-2 w-full accent-[#9C1C7C] cursor-pointer"
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* 3. BRIEFING SECTION */}
+        <section className="rounded-[28px] bg-white border border-gray-100 p-5 shadow-[0_4px_20px_rgba(30,27,75,0.04)]">
+          <div className="flex items-center gap-2.5 pb-3 border-b border-gray-100">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#F5B800]/20 text-[#F5B800]">
+              <AiIcon className="h-4 w-4" />
+            </div>
+            <h3 className="text-sm font-bold text-[#1E1B4B]">Briefing</h3>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-[#1E1B4B]">Local Weather & Forecast</span>
+              <ToggleSwitch
+                checked={settings.aiBriefingWeather}
+                onChange={(val) => {
+                  hapticsService.light();
+                  onUpdateSetting('aiBriefingWeather', val);
+                }}
+                label="Local Weather"
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-[#1E1B4B]">Today's Calendar & Schedule</span>
+              <ToggleSwitch
+                checked={settings.aiBriefingCalendar}
+                onChange={(val) => {
+                  hapticsService.light();
+                  onUpdateSetting('aiBriefingCalendar', val);
+                }}
+                label="Today Calendar"
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-[#1E1B4B]">Positive Morning Motivation</span>
+              <ToggleSwitch
+                checked={settings.aiBriefingMotivation}
+                onChange={(val) => {
+                  hapticsService.light();
+                  onUpdateSetting('aiBriefingMotivation', val);
+                }}
+                label="Morning Motivation"
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* 4. ALARM RELIABILITY SECTION (With green/amber/red status per permission and a Fix button) */}
+        <section className="rounded-[28px] bg-white border border-gray-100 p-5 shadow-[0_4px_20px_rgba(30,27,75,0.04)]">
+          <div className="flex items-center gap-2.5 pb-3 border-b border-gray-100">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#12A6A0]/10 text-[#12A6A0]">
+              <ShieldCheck className="h-4 w-4" />
+            </div>
+            <h3 className="text-sm font-bold text-[#1E1B4B]">Alarm Reliability</h3>
+          </div>
+
+          <p className="mt-3 text-xs text-[#6B7280] leading-relaxed">
+            AI Wake registers alarms with <code className="text-[#9C1C7C] font-semibold">AlarmManager.setAlarmClock()</code>. Each permission below is critical for guaranteed waking:
+          </p>
+
+          <div className="mt-4 space-y-2.5">
+            {/* Perm 1: Exact Alarms */}
+            <div className="flex items-center justify-between gap-3 rounded-2xl bg-[#F3F3F5] p-3.5">
+              <div className="flex items-center gap-2.5">
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    settings.exactAlarmPermission ? 'bg-emerald-500' : 'bg-red-500'
+                  }`}
+                />
+                <div>
+                  <span className="text-xs font-bold text-[#1E1B4B]">Exact Alarms</span>
+                  <p className="text-[10px] text-[#6B7280]">SCHEDULE_EXACT_ALARM</p>
+                </div>
+              </div>
+
+              {settings.exactAlarmPermission ? (
+                <span className="text-xs font-bold text-emerald-600">Active</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleRequestExactAlarm}
+                  className="rounded-xl bg-[#3B3D78] text-white px-3 py-1 text-xs font-bold"
+                >
+                  Fix
+                </button>
+              )}
+            </div>
+
+            {/* Perm 2: Battery Optimization */}
+            <div className="flex items-center justify-between gap-3 rounded-2xl bg-[#F3F3F5] p-3.5">
+              <div className="flex items-center gap-2.5">
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    settings.batteryOptimizationExempt ? 'bg-emerald-500' : 'bg-amber-500'
+                  }`}
+                />
+                <div>
+                  <span className="text-xs font-bold text-[#1E1B4B]">Battery Exemption</span>
+                  <p className="text-[10px] text-[#6B7280]">Prevents OEM killing</p>
+                </div>
+              </div>
+
+              {settings.batteryOptimizationExempt ? (
+                <span className="text-xs font-bold text-emerald-600">Active</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleRequestBatteryExemption}
+                  className="rounded-xl bg-[#3B3D78] text-white px-3 py-1 text-xs font-bold"
+                >
+                  Fix
+                </button>
+              )}
+            </div>
+
+            {/* Perm 3: Notifications */}
+            <div className="flex items-center justify-between gap-3 rounded-2xl bg-[#F3F3F5] p-3.5">
+              <div className="flex items-center gap-2.5">
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    settings.notificationPermission ? 'bg-emerald-500' : 'bg-amber-500'
+                  }`}
+                />
+                <div>
+                  <span className="text-xs font-bold text-[#1E1B4B]">Notifications</span>
+                  <p className="text-[10px] text-[#6B7280]">Heads-up snooze banners</p>
+                </div>
+              </div>
+              <span className="text-xs font-bold text-emerald-600">Active</span>
+            </div>
+
+            {/* Perm 4: Full Screen Lock Intent */}
+            <div className="flex items-center justify-between gap-3 rounded-2xl bg-[#F3F3F5] p-3.5">
+              <div className="flex items-center gap-2.5">
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    settings.fullScreenIntentPermission ? 'bg-emerald-500' : 'bg-red-500'
+                  }`}
+                />
+                <div>
+                  <span className="text-xs font-bold text-[#1E1B4B]">Full-Screen Alert</span>
+                  <p className="text-[10px] text-[#6B7280]">Displays over lock screen</p>
+                </div>
+              </div>
+              <span className="text-xs font-bold text-emerald-600">Active</span>
+            </div>
+          </div>
+        </section>
+
+        {/* 5. ABOUT SECTION (App Version, Privacy Policy, Rate the app, Send feedback) */}
+        <section className="rounded-[28px] bg-white border border-gray-100 p-5 shadow-[0_4px_20px_rgba(30,27,75,0.04)]">
+          <div className="flex items-center gap-2.5 pb-3 border-b border-gray-100">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#F57C1F]/10 text-[#F57C1F]">
+              <Info className="h-4 w-4" />
+            </div>
+            <h3 className="text-sm font-bold text-[#1E1B4B]">About</h3>
+          </div>
+
+          <div className="mt-3 divide-y divide-gray-100">
+            <div className="flex items-center justify-between py-3">
+              <span className="text-xs font-bold text-[#1E1B4B]">Version</span>
+              <span className="text-xs font-mono font-bold text-[#6B7280]">v1.0.0 (Build 102)</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setActiveModal('privacy')}
+              className="w-full flex items-center justify-between py-3 text-left hover:text-[#9C1C7C] transition-colors"
+            >
+              <span className="text-xs font-bold text-[#1E1B4B]">Privacy Policy</span>
+              <span className="text-xs text-[#9C1C7C] font-semibold">Local-First →</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveModal('rate')}
+              className="w-full flex items-center justify-between py-3 text-left hover:text-[#9C1C7C] transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Star className="h-4 w-4 text-[#F5B800] fill-[#F5B800]" />
+                <span className="text-xs font-bold text-[#1E1B4B]">Rate AI Wake</span>
+              </div>
+              <span className="text-xs text-[#6B7280]">5.0 ★</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveModal('feedback')}
+              className="w-full flex items-center justify-between py-3 text-left hover:text-[#9C1C7C] transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-[#12A6A0]" />
+                <span className="text-xs font-bold text-[#1E1B4B]">Send Feedback</span>
+              </div>
+              <span className="text-xs text-[#9C1C7C] font-semibold">Contact →</span>
+            </button>
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-bold text-[#1E1B4B]">Reset Stored Data</span>
+              <p className="text-[11px] text-[#6B7280]">Clears local alarms and routines</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                hapticsService.medium();
+                onResetAll();
+              }}
+              className="flex min-h-[44px] items-center gap-1.5 rounded-2xl bg-red-50 hover:bg-red-100 px-4 py-2 text-xs font-bold text-red-600 transition-colors"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>Reset</span>
+            </button>
+          </div>
+        </section>
       </div>
 
-      {permissionSuccessMessage && (
-        <div className="flex items-center gap-2 rounded-2xl border border-emerald-900/60 bg-emerald-950/30 p-3 text-xs text-emerald-300">
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-          <span>{permissionSuccessMessage}</span>
+      {/* Modal Dialogs for About Items */}
+      {activeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-sm rounded-[32px] bg-white p-6 shadow-2xl border border-gray-100 space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <h3 className="text-base font-bold text-[#1E1B4B] capitalize">
+                {activeModal === 'privacy' && 'Privacy Policy'}
+                {activeModal === 'rate' && 'Rate AI Wake'}
+                {activeModal === 'feedback' && 'Send Feedback'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setActiveModal(null)}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-gray-400 hover:text-[#1E1B4B] hover:bg-gray-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {activeModal === 'privacy' && (
+              <div className="text-xs text-[#6B7280] space-y-2 leading-relaxed">
+                <p>
+                  AI Wake operates on a <strong className="text-[#1E1B4B]">local-first</strong> architecture.
+                </p>
+                <p>
+                  Your alarm times, recurrence schedules, habits, and speech transcripts remain strictly on your device. We do not sell, track, or share your personal waking schedules with third parties.
+                </p>
+              </div>
+            )}
+
+            {activeModal === 'rate' && (
+              <div className="text-center space-y-3 py-2">
+                <div className="flex justify-center gap-1 text-[#F5B800]">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Star key={i} className="h-6 w-6 fill-current" />
+                  ))}
+                </div>
+                <p className="text-xs text-[#6B7280]">
+                  Enjoying AI Wake? Your positive review supports continuous development and new voice models!
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    hapticsService.success();
+                    setActiveModal(null);
+                    setFeedbackSuccess('Thank you for rating AI Wake!');
+                  }}
+                  className="w-full min-h-[44px] rounded-2xl bg-[#3B3D78] text-white text-xs font-bold"
+                >
+                  Submit 5-Star Rating
+                </button>
+              </div>
+            )}
+
+            {activeModal === 'feedback' && (
+              <div className="space-y-3">
+                <textarea
+                  rows={3}
+                  placeholder="Tell us what you'd love to see in future updates..."
+                  className="w-full rounded-2xl bg-[#F3F3F5] p-3 text-xs text-[#1E1B4B] focus:outline-none focus:ring-2 focus:ring-[#9C1C7C]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    hapticsService.success();
+                    setActiveModal(null);
+                    setFeedbackSuccess('Feedback received. Thank you!');
+                  }}
+                  className="w-full min-h-[44px] rounded-2xl bg-[#3B3D78] text-white text-xs font-bold"
+                >
+                  Send Feedback
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
-
-      {/* 1. Appearance Section */}
-      <section aria-labelledby="section-appearance" className="rounded-3xl border border-zinc-800 bg-zinc-900/70 p-5">
-        <div className="flex items-center gap-2.5 pb-3 border-b border-zinc-800/80">
-          <Sliders className="h-4 w-4 text-purple-400" />
-          <h3 id="section-appearance" className="text-sm font-bold text-zinc-100">
-            Clock & Appearance
-          </h3>
-        </div>
-
-        <div className="mt-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="text-xs sm:text-sm font-medium text-zinc-200">
-                24-Hour Time Format
-              </span>
-              <p className="text-[11px] text-zinc-400">
-                Display 14:00 instead of 02:00 PM
-              </p>
-            </div>
-            <ToggleSwitch
-              checked={settings.timeFormat24h}
-              onChange={(val) => onUpdateSetting('timeFormat24h', val)}
-              label="24-Hour Time Format"
-            />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="text-xs sm:text-sm font-medium text-zinc-200">
-                Show Live Seconds
-              </span>
-              <p className="text-[11px] text-zinc-400">
-                Display seconds counter on digital clock
-              </p>
-            </div>
-            <ToggleSwitch
-              checked={settings.showSeconds}
-              onChange={(val) => onUpdateSetting('showSeconds', val)}
-              label="Show Live Seconds"
-            />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="text-xs sm:text-sm font-medium text-zinc-200">
-                Android Device Frame Preview
-              </span>
-              <p className="text-[11px] text-zinc-400">
-                Render within realistic Android smartphone bezel frame
-              </p>
-            </div>
-            <ToggleSwitch
-              checked={settings.deviceFrameMockup}
-              onChange={(val) => onUpdateSetting('deviceFrameMockup', val)}
-              label="Android Device Frame Preview"
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* 2. Voice Preferences Section */}
-      <section aria-labelledby="section-voice" className="rounded-3xl border border-zinc-800 bg-zinc-900/70 p-5">
-        <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80">
-          <div className="flex items-center gap-2.5">
-            <Volume2 className="h-4 w-4 text-purple-400" />
-            <h3 id="section-voice" className="text-sm font-bold text-zinc-100">
-              AI Voice Persona & Speech
-            </h3>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleTestVoiceTone}
-            className="flex min-h-[36px] items-center gap-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 px-3 py-1 text-xs font-medium text-zinc-200 transition-colors"
-          >
-            <Play className="h-3 w-3 fill-current text-purple-400" />
-            <span>Test Sound</span>
-          </button>
-        </div>
-
-        <div className="mt-4 space-y-4">
-          <div>
-            <label className="text-xs font-medium text-zinc-300">Voice Style Preset</label>
-            <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {[
-                { id: 'warm', label: 'Warm & Serene', desc: 'Gentle, comforting cadence' },
-                { id: 'coach', label: 'Morning Coach', desc: 'Energizing and inspiring tone' },
-                { id: 'executive', label: 'Executive Briefing', desc: 'Concise, crisp agenda focus' },
-              ].map((style) => (
-                <button
-                  key={style.id}
-                  type="button"
-                  onClick={() => onUpdateSetting('aiVoiceStyle', style.id as any)}
-                  className={`flex flex-col items-start p-3 rounded-xl border text-left transition-colors ${
-                    settings.aiVoiceStyle === style.id
-                      ? 'border-purple-500 bg-purple-950/40 text-zinc-100'
-                      : 'border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700'
-                  }`}
-                >
-                  <span className="text-xs font-semibold text-zinc-200">{style.label}</span>
-                  <span className="text-[11px] text-zinc-400 mt-0.5">{style.desc}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-medium text-zinc-300">Speech Pace</span>
-              <span className="font-mono-numbers text-zinc-400">{settings.speechRate.toFixed(1)}x</span>
-            </div>
-            <input
-              type="range"
-              min="0.8"
-              max="1.2"
-              step="0.1"
-              value={settings.speechRate}
-              onChange={(e) => onUpdateSetting('speechRate', parseFloat(e.target.value))}
-              className="mt-2 w-full accent-purple-500 cursor-pointer"
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* 3. Android Permissions & Alarm Reliability (Critical for Android Architect Review) */}
-      <section aria-labelledby="section-reliability" className="rounded-3xl border border-zinc-800 bg-zinc-900/70 p-5">
-        <div className="flex items-center gap-2.5 pb-3 border-b border-zinc-800/80">
-          <ShieldCheck className="h-4 w-4 text-purple-400" />
-          <h3 id="section-reliability" className="text-sm font-bold text-zinc-100">
-            Android Alarm Reliability & Permissions
-          </h3>
-        </div>
-
-        <p className="mt-3 text-xs text-zinc-400 leading-relaxed">
-          Android 12+ Doze mode and manufacturer battery savers can kill background processes. AI Wake uses exact AlarmManager scheduling (<code className="text-purple-300">setAlarmClock</code>) and full-screen intents so your alarm rings even when locked.
-        </p>
-
-        <div className="mt-4 space-y-3.5">
-          {/* Permission 1: Exact Alarms */}
-          <div className="flex items-start justify-between gap-3 rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-3.5">
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold text-zinc-200">
-                  Exact Alarm Permission
-                </span>
-                <span className="text-[10px] text-zinc-400 font-mono">
-                  SCHEDULE_EXACT_ALARM
-                </span>
-              </div>
-              <p className="mt-0.5 text-[11px] text-zinc-400">
-                Guarantees millisecond wake accuracy even in deep Doze mode
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleRequestExactAlarm}
-              className="shrink-0 min-h-[36px] rounded-lg bg-zinc-800 hover:bg-zinc-700 px-3 py-1 text-xs font-medium text-purple-300 transition-colors"
-            >
-              Verify
-            </button>
-          </div>
-
-          {/* Permission 2: Battery Optimization */}
-          <div className="flex items-start justify-between gap-3 rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-3.5">
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold text-zinc-200">
-                  Battery Optimization Exemption
-                </span>
-                <span className="text-[10px] text-zinc-400 font-mono">
-                  IGNORE_BATTERY_OPTIMIZATIONS
-                </span>
-              </div>
-              <p className="mt-0.5 text-[11px] text-zinc-400">
-                Prevents aggressive OEM battery killers (Samsung/Xiaomi) from killing the alarm service
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleRequestBatteryExemption}
-              className="shrink-0 min-h-[36px] rounded-lg bg-zinc-800 hover:bg-zinc-700 px-3 py-1 text-xs font-medium text-purple-300 transition-colors"
-            >
-              Verify
-            </button>
-          </div>
-
-          {/* Permission 3: Full-Screen Intent */}
-          <div className="flex items-start justify-between gap-3 rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-3.5">
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold text-zinc-200">
-                  Full-Screen Lock Intent
-                </span>
-                <span className="text-[10px] text-zinc-400 font-mono">
-                  USE_FULL_SCREEN_INTENT
-                </span>
-              </div>
-              <p className="mt-0.5 text-[11px] text-zinc-400">
-                Displays the alarm ringing screen immediately on top of the lock screen
-              </p>
-            </div>
-            <span className="text-xs font-semibold text-emerald-400 py-1">Active</span>
-          </div>
-        </div>
-      </section>
-
-      {/* 4. AI Wake-Up Briefing Configuration */}
-      <section aria-labelledby="section-briefing" className="rounded-3xl border border-zinc-800 bg-zinc-900/70 p-5">
-        <div className="flex items-center gap-2.5 pb-3 border-b border-zinc-800/80">
-          <Sparkles className="h-4 w-4 text-purple-400" />
-          <h3 id="section-briefing" className="text-sm font-bold text-zinc-100">
-            AI Wake Briefing Elements
-          </h3>
-        </div>
-
-        <p className="mt-2 text-xs text-zinc-400">
-          Select information to include in your personalized wake-up speech:
-        </p>
-
-        <div className="mt-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-zinc-300">Local Weather & Forecast</span>
-            <ToggleSwitch
-              checked={settings.aiBriefingWeather}
-              onChange={(val) => onUpdateSetting('aiBriefingWeather', val)}
-              label="Local Weather"
-            />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-zinc-300">Today's Schedule & Calendar</span>
-            <ToggleSwitch
-              checked={settings.aiBriefingCalendar}
-              onChange={(val) => onUpdateSetting('aiBriefingCalendar', val)}
-              label="Today Schedule"
-            />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-zinc-300">Positive Morning Motivation</span>
-            <ToggleSwitch
-              checked={settings.aiBriefingMotivation}
-              onChange={(val) => onUpdateSetting('aiBriefingMotivation', val)}
-              label="Morning Motivation"
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* 5. Privacy & Data Storage */}
-      <section aria-labelledby="section-privacy" className="rounded-3xl border border-zinc-800 bg-zinc-900/70 p-5">
-        <div className="flex items-center gap-2.5 pb-3 border-b border-zinc-800/80">
-          <Database className="h-4 w-4 text-purple-400" />
-          <h3 id="section-privacy" className="text-sm font-bold text-zinc-100">
-            Privacy & Storage
-          </h3>
-        </div>
-
-        <p className="mt-3 text-xs text-zinc-400 leading-relaxed">
-          AI Wake is built on a <span className="text-zinc-200 font-medium">local-first</span> foundation. Your alarm times, schedule routines, and voice preferences remain on your device and are never sold or shared.
-        </p>
-
-        <div className="mt-4 pt-3 border-t border-zinc-800/80 flex items-center justify-between">
-          <div>
-            <span className="text-xs font-medium text-zinc-300">Reset Local Storage</span>
-            <p className="text-[11px] text-zinc-400">Clears alarms, routines, and cached chat history</p>
-          </div>
-          <button
-            type="button"
-            onClick={onResetAll}
-            className="flex min-h-[44px] items-center gap-1.5 rounded-xl border border-rose-900/60 bg-rose-950/20 hover:bg-rose-950/40 px-3.5 py-2 text-xs font-medium text-rose-300 transition-colors"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            <span>Reset Data</span>
-          </button>
-        </div>
-      </section>
     </div>
   );
 };
