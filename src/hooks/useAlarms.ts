@@ -1,7 +1,37 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Alarm, NextAlarmInfo } from '../types/alarm';
 import { storageService } from '../services/storageService';
-import { NativeAlarm } from '../services/nativeAlarmPlugin';
+import {
+  NativeAlarm,
+  setWebPreparedBriefing,
+  clearWebPreparedBriefing,
+} from '../services/nativeAlarmPlugin';
+import { generateMorningBriefing } from '../services/geminiText';
+import { getOrGenerateVoiceBlob, stripMarkdownForSpeech } from '../services/geminiVoice';
+
+function getNextAlarmDiffMinutes(alarm: Alarm): number {
+  const now = new Date();
+  const currentDay = now.getDay();
+  const currentMinutesTotal = now.getHours() * 60 + now.getMinutes();
+  const [h, m] = alarm.time.split(':').map(Number);
+  const alarmMinutesTotal = h * 60 + m;
+
+  if (!alarm.days || alarm.days.length === 0) {
+    let diff = alarmMinutesTotal - currentMinutesTotal;
+    if (diff <= 0) diff += 24 * 60;
+    return diff;
+  }
+
+  let minDiff = Infinity;
+  for (const day of alarm.days) {
+    let dayDiff = day - currentDay;
+    if (dayDiff < 0) dayDiff += 7;
+    let diff = dayDiff * 24 * 60 + (alarmMinutesTotal - currentMinutesTotal);
+    if (diff <= 0) diff += 7 * 24 * 60;
+    if (diff < minDiff) minDiff = diff;
+  }
+  return minDiff;
+}
 
 export function calculateNextAlarm(alarms: Alarm[]): NextAlarmInfo {
   const activeAlarms = alarms.filter((a) => a.enabled);
@@ -13,45 +43,14 @@ export function calculateNextAlarm(alarms: Alarm[]): NextAlarmInfo {
     };
   }
 
-  const now = new Date();
-  const currentDay = now.getDay(); // 0 = Sun ... 6 = Sat
-  const currentMinutesTotal = now.getHours() * 60 + now.getMinutes();
-
   let minDiffMinutes = Infinity;
   let targetAlarm: Alarm | null = null;
 
   for (const alarm of activeAlarms) {
-    const [h, m] = alarm.time.split(':').map(Number);
-    const alarmMinutesTotal = h * 60 + m;
-
-    if (!alarm.days || alarm.days.length === 0) {
-      // Once alarm
-      let diff = alarmMinutesTotal - currentMinutesTotal;
-      if (diff <= 0) {
-        diff += 24 * 60; // Next day
-      }
-      if (diff < minDiffMinutes) {
-        minDiffMinutes = diff;
-        targetAlarm = alarm;
-      }
-    } else {
-      // Repeating alarm on specific days
-      for (const day of alarm.days) {
-        let dayDiff = day - currentDay;
-        if (dayDiff < 0) {
-          dayDiff += 7;
-        }
-
-        let diff = dayDiff * 24 * 60 + (alarmMinutesTotal - currentMinutesTotal);
-        if (diff <= 0) {
-          diff += 7 * 24 * 60; // Next week
-        }
-
-        if (diff < minDiffMinutes) {
-          minDiffMinutes = diff;
-          targetAlarm = alarm;
-        }
-      }
+    const diff = getNextAlarmDiffMinutes(alarm);
+    if (diff < minDiffMinutes) {
+      minDiffMinutes = diff;
+      targetAlarm = alarm;
     }
   }
 
@@ -94,6 +93,87 @@ export function useAlarms() {
     storageService.saveAlarms(alarms);
   }, [alarms]);
 
+  // Periodically check briefing readiness (native filesDir or web IndexedDB/localStorage)
+  // and pre-prepare offline audio ~60m before ring when online.
+  const refreshBriefingStatuses = useCallback(async () => {
+    const current = storageService.getAlarms();
+    let changed = false;
+
+    const updated = await Promise.all(
+      current.map(async (alarm) => {
+        if (!alarm.enabled || !alarm.aiBriefing) {
+          if (alarm.briefingReady) {
+            changed = true;
+            return { ...alarm, briefingReady: false };
+          }
+          return alarm;
+        }
+
+        const status = await NativeAlarm.getBriefingStatus(alarm.id).catch(() => ({
+          ready: false,
+        }));
+
+        if (status.ready) {
+          if (!alarm.briefingReady) {
+            changed = true;
+            return { ...alarm, briefingReady: true };
+          }
+          return alarm;
+        }
+
+        // In web preview (non-native), prepare offline briefing ~60 minutes before alarm
+        if (!NativeAlarm.isNative() && typeof navigator !== 'undefined' && navigator.onLine) {
+          const diffMins = getNextAlarmDiffMinutes(alarm);
+          if (diffMins <= 60) {
+            try {
+              const settings = storageService.getSettings();
+              const routines = storageService.getSchedule();
+              const todayDow = new Date().getDay();
+              const todayRoutines = routines
+                .filter((r) => r.dayOfWeek === todayDow)
+                .map((r) => ({
+                  time: r.time,
+                  title: r.title,
+                  durationMinutes: r.durationMinutes,
+                }));
+
+              const persona = alarm.aiVoiceStyle || settings.aiVoiceStyle || 'warm';
+              const rawText = await generateMorningBriefing({
+                userName: settings.userName || 'Friend',
+                alarmLabel: alarm.label || 'Morning Wake',
+                currentDateTime: new Date().toLocaleString(),
+                routines: todayRoutines,
+                includeWeather: settings.aiBriefingWeather,
+                includeCalendar: settings.aiBriefingCalendar,
+                includeMotivation: settings.aiBriefingMotivation,
+                voiceStyle: persona,
+              });
+              const cleanText = stripMarkdownForSpeech(rawText);
+              await getOrGenerateVoiceBlob(cleanText, persona);
+              setWebPreparedBriefing(alarm.id, cleanText);
+              changed = true;
+              return { ...alarm, briefingReady: true };
+            } catch {
+              // Skip silently if keys unavailable or offline
+            }
+          }
+        }
+
+        return alarm;
+      })
+    );
+
+    if (changed) {
+      setAlarms(updated);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshBriefingStatuses();
+    const interval = window.setInterval(refreshBriefingStatuses, 60_000);
+    return () => window.clearInterval(interval);
+  }, [refreshBriefingStatuses]);
+
   const nextAlarmInfo = useMemo(() => calculateNextAlarm(alarms), [alarms]);
 
   const toggleAlarm = useCallback(async (id: string) => {
@@ -118,7 +198,7 @@ export function useAlarms() {
           } else {
             NativeAlarm.cancel(a.id).catch(console.error);
           }
-          return { ...a, enabled: nextState };
+          return { ...a, enabled: nextState, briefingReady: nextState ? a.briefingReady : false };
         }
         return a;
       });
@@ -129,7 +209,8 @@ export function useAlarms() {
   const addAlarm = useCallback(async (alarmData: Omit<Alarm, 'id' | 'createdAt'>) => {
     const newAlarm: Alarm = {
       ...alarmData,
-      id: `alarm_${Date.now()}`,
+      id: `alarm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      briefingReady: false,
       createdAt: Date.now(),
     };
     setAlarms((prev) => [newAlarm, ...prev]);
@@ -152,27 +233,30 @@ export function useAlarms() {
   }, []);
 
   const updateAlarm = useCallback(async (updated: Alarm) => {
-    setAlarms((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
-    if (updated.enabled) {
+    clearWebPreparedBriefing(updated.id);
+    const sanitized = { ...updated, briefingReady: false };
+    setAlarms((prev) => prev.map((a) => (a.id === sanitized.id ? sanitized : a)));
+    if (sanitized.enabled) {
       await NativeAlarm.schedule({
-        id: updated.id,
-        time: updated.time,
-        days: updated.days,
-        label: updated.label,
-        soundId: updated.soundId,
-        volume: updated.volume,
-        vibrate: updated.vibrate,
-        snoozeIntervalMinutes: updated.snoozeIntervalMinutes,
-        snoozeLimit: updated.snoozeLimit,
-        aiBriefing: updated.aiBriefing,
-        aiVoiceStyle: updated.aiVoiceStyle,
+        id: sanitized.id,
+        time: sanitized.time,
+        days: sanitized.days,
+        label: sanitized.label,
+        soundId: sanitized.soundId,
+        volume: sanitized.volume,
+        vibrate: sanitized.vibrate,
+        snoozeIntervalMinutes: sanitized.snoozeIntervalMinutes,
+        snoozeLimit: sanitized.snoozeLimit,
+        aiBriefing: sanitized.aiBriefing,
+        aiVoiceStyle: sanitized.aiVoiceStyle,
       }).catch(console.error);
     } else {
-      await NativeAlarm.cancel(updated.id).catch(console.error);
+      await NativeAlarm.cancel(sanitized.id).catch(console.error);
     }
   }, []);
 
   const deleteAlarm = useCallback(async (id: string) => {
+    clearWebPreparedBriefing(id);
     await NativeAlarm.cancel(id).catch(console.error);
     setAlarms((prev) => prev.filter((a) => a.id !== id));
   }, []);
@@ -184,5 +268,6 @@ export function useAlarms() {
     addAlarm,
     updateAlarm,
     deleteAlarm,
+    refreshBriefingStatuses,
   };
 }

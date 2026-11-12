@@ -12,6 +12,7 @@ export interface Alarm {
   snoozeCount?: number;
   aiBriefing: boolean;
   aiVoiceStyle?: 'warm' | 'coach' | 'executive';
+  briefingReady?: boolean;
   createdAt: number;
 }
 

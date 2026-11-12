@@ -12,7 +12,8 @@ import { useSettings } from './hooks/useSettings';
 import { BottomNavigation } from './components/layout/BottomNavigation';
 import { NotificationDrawer } from './components/layout/NotificationDrawer';
 import { AlarmFormModal } from './components/alarm/AlarmFormModal';
-import { OnboardingModal } from './components/onboarding/OnboardingModal';
+import { OnboardingModal, ReliabilityPermissionType } from './components/onboarding/OnboardingModal';
+import { NativeAlarm } from './services/nativeAlarmPlugin';
 
 // Pages
 import { HomePage } from './pages/HomePage';
@@ -48,7 +49,65 @@ export default function App() {
     deleteRoutine,
   } = useSchedule();
 
-  const { settings, updateSetting, resetAllSettings } = useSettings();
+  const { settings, updateSetting, refreshPermissions, resetAllSettings } = useSettings();
+
+  // Check native Android reliability permissions on launch and whenever returning to app
+  useEffect(() => {
+    refreshPermissions();
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        refreshPermissions();
+      }
+    };
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    return () => {
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
+  }, [refreshPermissions]);
+
+  // Keep native WorkManager briefing worker context synced with user settings & routines
+  useEffect(() => {
+    const serverUrl =
+      typeof window !== 'undefined' && window.location.origin.startsWith('http')
+        ? window.location.origin
+        : '';
+    NativeAlarm.syncBriefingContext({
+      userName: settings.userName || 'Friend',
+      routines: routines.map((r) => ({
+        time: r.time,
+        title: r.title,
+        durationMinutes: r.durationMinutes,
+        dayOfWeek: r.dayOfWeek,
+      })),
+      serverUrl,
+      includeWeather: settings.aiBriefingWeather,
+      includeCalendar: settings.aiBriefingCalendar,
+      includeMotivation: settings.aiBriefingMotivation,
+      voiceStyle: settings.aiVoiceStyle,
+    }).catch(() => {});
+  }, [
+    settings.userName,
+    settings.aiBriefingWeather,
+    settings.aiBriefingCalendar,
+    settings.aiBriefingMotivation,
+    settings.aiVoiceStyle,
+    routines,
+  ]);
+
+  const handleRequestPermission = async (type: ReliabilityPermissionType) => {
+    if (type === 'exact') {
+      await NativeAlarm.requestExactAlarm();
+    } else if (type === 'notifications') {
+      await NativeAlarm.requestNotification();
+    } else if (type === 'fullscreen') {
+      await NativeAlarm.requestFullScreenIntent();
+    } else if (type === 'battery') {
+      await NativeAlarm.requestBatteryExempt();
+    }
+    await refreshPermissions();
+  };
 
   // Handle Android hardware back button / browser back navigation
   useEffect(() => {
@@ -144,6 +203,8 @@ export default function App() {
     return (
       <AlarmRingingScreen
         alarm={ringingAlarm}
+        settings={settings}
+        routines={routines}
         onDismiss={() => setRingingAlarm(null)}
         onSnooze={() => setRingingAlarm(null)}
       />
@@ -153,103 +214,117 @@ export default function App() {
   const activeAlarmsCount = alarms.filter((a) => a.enabled).length;
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-white text-[#1E1B4B] flex flex-col font-sans selection:bg-[#9C1C7C]/20 selection:text-[#9C1C7C]">
+    <div className="flex flex-col h-[100dvh] w-full bg-white text-[#1E1B4B] font-sans selection:bg-[#9C1C7C]/20 selection:text-[#9C1C7C]">
       {/* 1. FIRST-RUN ONBOARDING (shown once until completed) */}
       <OnboardingModal
         isOpen={!settings.onboardingCompleted}
-        initialName={settings.userName || 'Alex'}
+        initialName={settings.userName || ''}
+        settings={settings}
+        onRequestPermission={handleRequestPermission}
         onComplete={handleCompleteOnboarding}
       />
 
-      {/* Main Viewport */}
-      <div className="w-full flex-1 flex flex-col">
-        {/* HOME SCREEN */}
-        {activePage === 'home' && (
-          <div className="flex-1 flex flex-col transition-opacity duration-200">
-            <HomePage
-              nextAlarmInfo={nextAlarmInfo}
-              activeAlarms={alarms}
-              settings={settings}
-              onToggleAlarm={toggleAlarm}
-              onOpenCreateAlarm={() => {
-                setEditingAlarm(null);
-                setIsNewAlarmModalOpen(true);
-              }}
-              onOpenEditAlarm={(alarm) => {
-                setEditingAlarm(alarm);
-                setIsNewAlarmModalOpen(true);
-              }}
-              onDeleteAlarm={deleteAlarm}
-              onRestoreAlarm={handleRestoreAlarm}
-              onQuickCreateNap={handleQuickCreateNap}
-              onNavigate={navigateTo}
-              onTestRing={handleTriggerTestRing}
-              onOpenNotifications={() => setIsNotificationOpen(true)}
-            />
+      {/* HOME SCREEN: single scrolling main content area + bottom nav outside scroll area */}
+      {activePage === 'home' && (
+        <>
+          <HomePage
+            nextAlarmInfo={nextAlarmInfo}
+            activeAlarms={alarms}
+            settings={settings}
+            onToggleAlarm={toggleAlarm}
+            onOpenCreateAlarm={() => {
+              setEditingAlarm(null);
+              setIsNewAlarmModalOpen(true);
+            }}
+            onOpenEditAlarm={(alarm) => {
+              setEditingAlarm(alarm);
+              setIsNewAlarmModalOpen(true);
+            }}
+            onDeleteAlarm={deleteAlarm}
+            onRestoreAlarm={handleRestoreAlarm}
+            onQuickCreateNap={handleQuickCreateNap}
+            onNavigate={navigateTo}
+            onTestRing={handleTriggerTestRing}
+            onOpenNotifications={() => setIsNotificationOpen(true)}
+          />
 
-            {/* Bottom Navigation is ONLY shown on Home screen */}
-            <BottomNavigation
-              onNavigate={navigateTo}
-              onOpenNewAlarm={() => {
-                setEditingAlarm(null);
-                setIsNewAlarmModalOpen(true);
-              }}
-              alarmCount={activeAlarmsCount}
-            />
-          </div>
-        )}
+          {/* Bottom Navigation is ONLY shown on Home screen and sits outside the scroll area */}
+          <BottomNavigation
+            onNavigate={navigateTo}
+            onOpenNewAlarm={() => {
+              setEditingAlarm(null);
+              setIsNewAlarmModalOpen(true);
+            }}
+            alarmCount={activeAlarmsCount}
+          />
+        </>
+      )}
 
-        {/* FULL-SCREEN SUBPAGES (No bottom navigation, has back arrow to Home) */}
-        {activePage === 'alarms' && (
-          <div className="flex-1">
-            <AlarmsPage
-              alarms={alarms}
-              timeFormat24h={settings.timeFormat24h}
-              onBack={navigateBackToHome}
-              onToggleAlarm={toggleAlarm}
-              onAddAlarm={addAlarm}
-              onUpdateAlarm={updateAlarm}
-              onDeleteAlarm={deleteAlarm}
-              onTestRing={handleTriggerTestRing}
-            />
-          </div>
-        )}
+      {/* FULL-SCREEN SUBPAGES (No bottom navigation, header on top, content scrolls) */}
+      {activePage === 'alarms' && (
+        <AlarmsPage
+          alarms={alarms}
+          timeFormat24h={settings.timeFormat24h}
+          onBack={navigateBackToHome}
+          onToggleAlarm={toggleAlarm}
+          onAddAlarm={addAlarm}
+          onUpdateAlarm={updateAlarm}
+          onDeleteAlarm={deleteAlarm}
+          onTestRing={handleTriggerTestRing}
+        />
+      )}
 
-        {activePage === 'assistant' && (
-          <div className="flex-1">
-            <AssistantPage
-              onBack={navigateBackToHome}
-              onAddAlarm={addAlarm}
-              onNavigateToAlarms={() => navigateTo('alarms')}
-            />
-          </div>
-        )}
+      {activePage === 'assistant' && (
+        <AssistantPage
+          alarms={alarms}
+          routines={routines}
+          settings={settings}
+          onBack={navigateBackToHome}
+          onAddAlarm={addAlarm}
+          onUpdateAlarm={updateAlarm}
+          onDeleteAlarm={deleteAlarm}
+          onToggleAlarm={toggleAlarm}
+          onAddRoutine={addRoutine}
+          onDeleteRoutine={deleteRoutine}
+          onViewAlarm={(alarmId) => {
+            const target = alarms.find((a) => a.id === alarmId);
+            if (target) {
+              setEditingAlarm(target);
+              setIsNewAlarmModalOpen(true);
+            } else {
+              navigateTo('alarms');
+            }
+          }}
+          onViewSchedule={(dayOfWeek) => {
+            if (typeof dayOfWeek === 'number') {
+              setSelectedDay(dayOfWeek);
+            }
+            navigateTo('schedule');
+          }}
+        />
+      )}
 
-        {activePage === 'schedule' && (
-          <div className="flex-1">
-            <SchedulePage
-              routines={routines}
-              selectedDay={selectedDay}
-              onBack={navigateBackToHome}
-              onSelectDay={setSelectedDay}
-              onToggleRoutine={toggleRoutine}
-              onAddRoutine={addRoutine}
-              onDeleteRoutine={deleteRoutine}
-            />
-          </div>
-        )}
+      {activePage === 'schedule' && (
+        <SchedulePage
+          routines={routines}
+          selectedDay={selectedDay}
+          onBack={navigateBackToHome}
+          onSelectDay={setSelectedDay}
+          onToggleRoutine={toggleRoutine}
+          onAddRoutine={addRoutine}
+          onDeleteRoutine={deleteRoutine}
+        />
+      )}
 
-        {activePage === 'settings' && (
-          <div className="flex-1">
-            <SettingsPage
-              settings={settings}
-              onBack={navigateBackToHome}
-              onUpdateSetting={updateSetting}
-              onResetAll={resetAllSettings}
-            />
-          </div>
-        )}
-      </div>
+      {activePage === 'settings' && (
+        <SettingsPage
+          settings={settings}
+          onBack={navigateBackToHome}
+          onUpdateSetting={updateSetting}
+          onRefreshPermissions={refreshPermissions}
+          onResetAll={resetAllSettings}
+        />
+      )}
 
       {/* Global Notifications Drawer */}
       <NotificationDrawer
@@ -263,6 +338,7 @@ export default function App() {
 
       {/* Bottom Sheet Alarm Form (Create or Edit) */}
       <AlarmFormModal
+        key={isNewAlarmModalOpen ? editingAlarm?.id || 'new' : 'closed'}
         isOpen={isNewAlarmModalOpen}
         initialAlarm={editingAlarm}
         timeFormat24h={settings.timeFormat24h}

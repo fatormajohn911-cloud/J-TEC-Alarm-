@@ -6,7 +6,8 @@ import { ChatMessage } from '../types/assistant';
 const ALARMS_KEY = 'ai_wake_alarms_v1';
 const SCHEDULE_KEY = 'ai_wake_schedule_v1';
 const SETTINGS_KEY = 'ai_wake_settings_v1';
-const CHAT_KEY = 'ai_wake_chat_v1';
+const CHAT_KEY = 'ai_wake_chat_v2';
+const WEATHER_CITY_KEY = 'ai_wake_weather_city_v1';
 
 const INITIAL_ALARMS: Alarm[] = [
   {
@@ -109,41 +110,6 @@ const INITIAL_ROUTINES: ScheduleRoutine[] = [
   },
 ];
 
-const INITIAL_MESSAGES: ChatMessage[] = [
-  {
-    id: 'msg_welcome',
-    sender: 'assistant',
-    text: "Hello! I am AI Wake. In this Phase 1 build, our tactile alarm architecture and responsive layout are fully active. In Phase 2, our natural language voice pipeline will transcribe your speech and automatically set alarms, sync with your Google Calendar, and craft personalized wake-up briefings.",
-    timestamp: Date.now() - 3600000,
-    isStagedPhase2Notice: true,
-  },
-  {
-    id: 'msg_sample_user',
-    sender: 'user',
-    text: "Set an alarm for 6:30 AM tomorrow for morning gym and briefing.",
-    timestamp: Date.now() - 1800000,
-  },
-  {
-    id: 'msg_sample_assistant',
-    sender: 'assistant',
-    text: "I've structured your request below. Review and save it to your native alarms.",
-    timestamp: Date.now() - 1790000,
-    parsedAlarm: {
-      time: '06:30',
-      label: 'Morning Gym & Briefing',
-      days: [1, 2, 3, 4, 5],
-      enabled: true,
-      soundId: 'aurora',
-      volume: 85,
-      vibrate: true,
-      snoozeIntervalMinutes: 9,
-      snoozeLimit: 3,
-      aiBriefing: true,
-    },
-    actionSuggested: 'confirm_alarm',
-  },
-];
-
 export const storageService = {
   getAlarms(): Alarm[] {
     try {
@@ -212,12 +178,12 @@ export const storageService = {
     try {
       const data = localStorage.getItem(CHAT_KEY);
       if (!data) {
-        localStorage.setItem(CHAT_KEY, JSON.stringify(INITIAL_MESSAGES));
-        return INITIAL_MESSAGES;
+        return [];
       }
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
-      return INITIAL_MESSAGES;
+      return [];
     }
   },
 
@@ -229,10 +195,36 @@ export const storageService = {
     }
   },
 
+  clearChatHistory(): void {
+    try {
+      localStorage.removeItem(CHAT_KEY);
+    } catch (err) {
+      console.error('Error clearing chat history from localStorage', err);
+    }
+  },
+
+  getWeatherCity(): string | null {
+    try {
+      return localStorage.getItem(WEATHER_CITY_KEY);
+    } catch {
+      return null;
+    }
+  },
+
+  saveWeatherCity(city: string): void {
+    try {
+      localStorage.setItem(WEATHER_CITY_KEY, city);
+    } catch (err) {
+      console.error('Error saving weather city to localStorage', err);
+    }
+  },
+
   clearAllData(): void {
     localStorage.removeItem(ALARMS_KEY);
     localStorage.removeItem(SCHEDULE_KEY);
     localStorage.removeItem(SETTINGS_KEY);
     localStorage.removeItem(CHAT_KEY);
+    localStorage.removeItem(WEATHER_CITY_KEY);
+    localStorage.removeItem('ai_wake_chat_v1');
   },
 };

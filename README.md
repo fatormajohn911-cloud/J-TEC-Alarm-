@@ -1,124 +1,99 @@
 # AI Wake — Intelligent Android Alarm Clock & Assistant
 
-AI Wake is an intelligent, privacy-first Android alarm clock and personal wake-up assistant built with **React**, **TypeScript**, **Capacitor**, and custom **Kotlin native plugins**. It is engineered to bridge modern web UI fluidity with rock-solid Android `AlarmManager` reliability.
+AI Wake is an intelligent, privacy-first Android alarm clock and personal wake-up assistant built with **React**, **TypeScript**, **Capacitor 8**, and custom **Kotlin native plugins** (`com.aiwake.app`).
 
 ---
 
-## 1. Phase 1 Architecture Overview
+## Project Structure
 
-```
-src/
-├── components/
-│   ├── layout/            # AppHeader, BottomNavigation, NotificationDrawer, AndroidStatusBarMock
-│   ├── alarm/             # AlarmCard, AlarmFormModal
-│   ├── assistant/         # Assistant conversational interface & structured parser cards
-│   ├── schedule/          # Schedule timeline, AddRoutineModal
-│   └── common/            # DigitalClock (live ticking & glow), ToggleSwitch, audio synthesizers
-├── pages/
-│   ├── HomePage.tsx       # Live digital clock, next alarm countdown, quick nap, today routines
-│   ├── AssistantPage.tsx  # Natural language prompt interface, listening/thinking/speaking states
-│   ├── SchedulePage.tsx   # Day-of-week routine scheduler & habit alignment
-│   ├── AlarmsPage.tsx     # Full alarm CRUD, repeat days, sound preview, test ring launcher
-│   ├── SettingsPage.tsx   # Clock formats, AI voice style, Android permissions & reliability
-│   └── AlarmRingingScreen.tsx # Dedicated full-screen ringing experience with soundwaves & briefing
-├── services/
-│   ├── nativeAlarmPlugin.ts # Capacitor plugin TypeScript bridge + Web Audio API fallback engine
-│   └── storageService.ts    # Local-first persistence layer for alarms, routines, and settings
-├── hooks/
-│   ├── useAlarms.ts       # Accurate countdown math, CRUD, and native plugin dispatch
-│   ├── useClock.ts        # Tabular live clock hook with 12h/24h and greeting calculation
-│   ├── useSchedule.ts     # Daily routines and checklist management
-│   └── useSettings.ts     # Global user preferences & permission states
-└── types/                 # Domain interfaces for alarms, routines, assistant, and settings
-
-android/
-└── app/src/main/
-    ├── AndroidManifest.xml # Exact alarm, full-screen intent, wakelock, and boot permissions
-    └── java/com/aiwake/app/
-        ├── MainActivity.kt # BridgeActivity with lock-screen wake flags & plugin registration
-        └── plugin/
-            ├── AlarmPlugin.kt            # CapacitorPlugin exposing scheduleAlarm, checkPermissions
-            ├── AlarmReceiver.kt          # BroadcastReceiver triggered by AlarmManager
-            ├── AlarmService.kt           # Foreground Service playing ringtone & vibration
-            ├── AlarmNotificationHelper.kt# High-priority channel & full-screen lock intent
-            └── BootReceiver.kt           # Restores scheduled alarms on Android reboot
-```
+- `src/`: React + TypeScript application UI, hooks, services, and Capacitor plugin bridge.
+- `assets/`: Vector brand artwork (`logo.svg`, `icon-foreground.svg`, `icon-background.svg`, `notification-icon.svg`, `splash.svg`).
+- `native-overlay/android/`: Custom Kotlin alarm engine (`MainActivity.kt`, `AlarmPlugin.kt`, `AlarmScheduler.kt`, `AlarmReceiver.kt`, `AlarmService.kt`, `AlarmNotificationHelper.kt`, `AlarmStore.kt`, `BootReceiver.kt`, `BriefingWorker.kt`), `AndroidManifest.xml`, and vector drawables copied over the generated Capacitor `android/` folder during builds.
+- `.github/workflows/`: Automated CI/CD pipelines for GitHub Pages (`pages.yml`) and Android APK/AAB builds (`android.yml`).
 
 ---
 
-## 2. Android Native Alarm Reliability Strategy
+## Local Development
 
-Android 12+ (API 31+) and OEM battery optimizations (e.g. Samsung OneUI, Xiaomi MIUI) aggressively kill background timers. AI Wake solves this with native Android best practices:
-
-1. **`AlarmManager.setAlarmClock()`**: Uses exact hardware alarms that punch through Android Doze mode and show the official alarm icon in the Android status bar.
-2. **`USE_FULL_SCREEN_INTENT` & `showWhenLocked`**: Allows the alarm ringing screen to display directly over the device lock screen without requiring user fingerprint or PIN first.
-3. **`PARTIAL_WAKE_LOCK`**: `AlarmReceiver` acquires a CPU wake lock immediately upon receipt to guarantee the CPU does not sleep before starting `AlarmService`.
-4. **Foreground Service**: `AlarmService` runs as a `mediaPlayback` foreground service with high-priority notifications to avoid being killed by the Android system.
-5. **`RECEIVE_BOOT_COMPLETED`**: `BootReceiver` automatically reschedules all active alarms when the phone restarts.
-
----
-
-## 3. Five Core Application Screens & Special Ringing Screen
-
-1. **Home**:
-   - Large live digital clock with tabular figures, date, and dynamic time-of-day greeting.
-   - Next upcoming alarm card with live countdown (`Rings in 6h 32m`) and toggle.
-   - Quick power nap actions (+20m Nap, +45m Rest, Custom).
-   - AI assistant entry card and today's schedule preview.
-2. **AI Assistant**:
-   - Conversational layout with message bubbles.
-   - Visual state indicators: *Idle*, *Listening*, *Thinking*, *Speaking*.
-   - Structured alarm cards parsed from natural language, with a 1-tap "Confirm & Save Alarm" action.
-3. **Daily Schedule**:
-   - Day-of-week switcher (Sun–Sat) with checklist completion and category filters.
-   - Routines tied to morning wake-up protocols (hydration, sunlight, focus blocks).
-4. **Alarms**:
-   - Complete alarm management (create, edit, delete, toggle).
-   - Day recurrence selectors (M, T, W, T, F, S, S), snooze intervals, and ringtone preview.
-   - Dedicated "Test Ring" button on each alarm to launch the ringing experience.
-5. **Settings & Reliability**:
-   - Clock preferences (12/24 hour, live seconds toggle).
-   - Simulated Android device frame preview toggle.
-   - AI voice persona selection (Warm & Serene, Morning Coach, Executive Briefing).
-   - Android system permissions audit (`SCHEDULE_EXACT_ALARM`, `IGNORE_BATTERY_OPTIMIZATIONS`).
-6. **Special Screen: Full-Screen Alarm Ringing Experience**:
-   - Completely replaces header and bottom navigation.
-   - Displays massive readable digital clock and alarm label.
-   - Animated audio soundwave frequency visualizer.
-   - Spoken AI morning briefing transcript with simulated step-by-step delivery.
-   - High-contrast Dismiss and Snooze controls.
-
----
-
-## 4. Development & Android Build Instructions
-
-### Run the Web Preview Locally
 ```bash
 npm install
 npm run dev
 ```
 
-### Build Web Distribution
-```bash
-npm run build
-```
-
-### Package into Android via Capacitor
-```bash
-# Add Android native platform (first time)
-npx cap add android
-
-# Sync web assets and Kotlin plugin code into the Android project
-npx cap sync android
-
-# Open project in Android Studio to build APK or run on connected device/emulator
-npx cap open android
-```
+Useful scripts:
+- `npm run build:web` — Builds the static web bundle (`dist/`) with `base: './'`.
+- `npm run assets` — Converts SVG assets in `assets/` to 1024px PNGs with `sharp` and generates Android launcher icons and splash screens.
+- `npm run cap:sync` — Syncs `dist/` and Capacitor plugins into `android/`.
 
 ---
 
-## 5. Phase 2 Roadmap
+## CI/CD Setup Guide
 
-- **Gemini 2.0 Voice Briefings**: Synthesizes real-time weather, commute traffic, and calendar events into personalized audio wake-up messages.
-- **Android SpeechRecognizer Integration**: Hands-free voice commands to snooze, dismiss, or schedule alarms.
-- **Sleep Quality Tracking**: Integration with Android Health Connect.
+### 1. Add GitHub Repository Secrets
+
+In your GitHub repository, open **Settings > Secrets and variables > Actions** and click **New repository secret** for each key below:
+
+| Secret Name | Purpose |
+| --- | --- |
+| `VITE_GEMINI_TEXT_KEY` | Gemini Text API key for AI Assistant chat and morning briefing scripts |
+| `VITE_GEMINI_VOICE_KEY` | Gemini Voice TTS API key for spoken briefings and Test Tone |
+| `ANDROID_KEYSTORE_BASE64` | Base64-encoded release upload keystore (for signed release APK/AAB) |
+| `ANDROID_KEYSTORE_PASSWORD` | Password for the keystore file |
+| `ANDROID_KEY_ALIAS` | Alias of the signing key inside the keystore |
+| `ANDROID_KEY_PASSWORD` | Password for the signing key alias |
+
+*(Never commit `.env`, `.jks`, or `.keystore` files to Git.)*
+
+---
+
+### 2. Create an Android Keystore & Encode to Base64
+
+Run `keytool` (included with JDK 21) to generate a release keystore:
+
+```bash
+keytool -genkeypair -v \
+  -keystore aiwake-release.jks \
+  -alias aiwake \
+  -keyalg RSA \
+  -keysize 2048 \
+  -validity 10000
+```
+
+Encode the keystore file to a single-line base64 string for `ANDROID_KEYSTORE_BASE64`:
+
+```bash
+# macOS / Linux
+base64 -w 0 aiwake-release.jks 2>/dev/null || base64 -i aiwake-release.jks | tr -d '\n'
+```
+
+Copy the output string into the `ANDROID_KEYSTORE_BASE64` repository secret and store `aiwake-release.jks` safely outside the repository.
+
+---
+
+### 3. Enable GitHub Pages
+
+1. Push the repository to the `main` branch.
+2. Open **Settings > Pages** in your GitHub repository.
+3. Under **Build and deployment > Source**, select **GitHub Actions**.
+4. The **Deploy Web App to GitHub Pages** workflow (`.github/workflows/pages.yml`) will automatically build `dist/` and publish the site on every push to `main` (or when triggered manually).
+
+---
+
+### 4. Download the Debug APK from GitHub Actions
+
+1. Every push to `main` (or manual run from the **Actions** tab) runs **Build Android APK & Release** (`.github/workflows/android.yml`).
+2. Open the **Actions** tab, select the latest **Build Android APK & Release** workflow run, and scroll down to **Artifacts**.
+3. Download **`AIWake-debug-apk`** and unzip it to install the APK on your Android device.
+
+---
+
+### 5. Start a Signed Play Store Release (APK + AAB)
+
+When your signing secrets (`ANDROID_KEYSTORE_*`) are configured, push a version tag starting with `v`:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This triggers `.github/workflows/android.yml` to set `versionName` to `1.0.0` (and `versionCode` to the run number), build both a signed **Release APK** and a Google Play Store **AAB** (`bundleRelease`), upload them as workflow artifacts, and attach both files to a new **GitHub Release**.

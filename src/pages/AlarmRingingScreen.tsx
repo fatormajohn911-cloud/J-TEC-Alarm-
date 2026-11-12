@@ -1,24 +1,39 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, useMotionValue, useTransform } from 'motion/react';
 import { Alarm } from '../types/alarm';
+import { ScheduleRoutine } from '../types/schedule';
+import { AppSettings } from '../types/settings';
 import { alarmAudio } from '../services/nativeAlarmPlugin';
+import { generateMorningBriefing } from '../services/geminiText';
+import {
+  speakText,
+  stopVoicePlayback,
+  stripMarkdownForSpeech,
+} from '../services/geminiVoice';
 import { hapticsService } from '../services/hapticsService';
-import { BellOff, Clock, Volume2, ArrowRight } from 'lucide-react';
+import { Clock, Volume2, VolumeX, ArrowRight } from 'lucide-react';
 import { AiIcon } from '../components/common/AiIcon';
 
 interface AlarmRingingScreenProps {
   alarm: Alarm;
+  settings?: AppSettings;
+  routines?: ScheduleRoutine[];
   onDismiss: () => void;
   onSnooze: (minutes: number) => void;
 }
 
 export const AlarmRingingScreen: React.FC<AlarmRingingScreenProps> = ({
   alarm,
+  settings,
+  routines = [],
   onDismiss,
   onSnooze,
 }) => {
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
-  const [briefingStep, setBriefingStep] = useState(0);
+  const [briefingText, setBriefingText] = useState<string>(
+    `Good morning${settings?.userName ? `, ${settings.userName}` : ''}. Preparing your morning briefing...`
+  );
+  const [isSpeakingVoice, setIsSpeakingVoice] = useState(false);
 
   // Slide to dismiss motion value
   const dragX = useMotionValue(0);
@@ -40,39 +55,141 @@ export const AlarmRingingScreen: React.FC<AlarmRingingScreenProps> = ({
       setCurrentTime(new Date());
     }, 1000);
 
-    const briefingTimer = setInterval(() => {
-      setBriefingStep((prev) => (prev < 3 ? prev + 1 : prev));
-    }, 2400);
-
     return () => {
       alarmAudio.stopAlarmLoop();
+      stopVoicePlayback();
       clearInterval(clockTimer);
-      clearInterval(briefingTimer);
     };
   }, [alarm.soundId, alarm.volume]);
+
+  // Ringtone starts immediately; after ~5 seconds, duck ringtone and play prepared briefing
+  useEffect(() => {
+    if (!alarm.aiBriefing) return;
+
+    let cancelled = false;
+    const todayIndex = new Date().getDay();
+    const todayRoutines = routines
+      .filter((r) => r.dayOfWeek === todayIndex)
+      .sort((a, b) => a.time.localeCompare(b.time));
+
+    const persona = alarm.aiVoiceStyle || settings?.aiVoiceStyle || 'warm';
+    const speechRate = settings?.speechRate ?? 1.0;
+    const fullVolume = alarm.volume ?? 85;
+    const duckedVolume = Math.max(10, Math.round(fullVolume * 0.18));
+
+    const timerId = window.setTimeout(async () => {
+      if (cancelled) return;
+
+      // Prefer offline pre-prepared briefing text if available (no network dependency at ring time)
+      let text = '';
+      try {
+        text = localStorage.getItem(`ai_wake_briefing_text_${alarm.id}`) || '';
+      } catch {
+        text = '';
+      }
+
+      if (!text && navigator.onLine) {
+        try {
+          text = await generateMorningBriefing({
+            userName: settings?.userName || 'Friend',
+            alarmLabel: alarm.label || 'Morning Wake',
+            currentDateTime: new Date().toLocaleString(),
+            routines: todayRoutines.map((r) => ({
+              time: r.time,
+              title: r.title,
+              durationMinutes: r.durationMinutes,
+            })),
+            includeWeather: settings?.aiBriefingWeather ?? true,
+            includeCalendar: settings?.aiBriefingCalendar ?? true,
+            includeMotivation: settings?.aiBriefingMotivation ?? true,
+            voiceStyle: persona,
+          });
+        } catch {
+          text = '';
+        }
+      }
+
+      if (!text) {
+        const firstRoutine = todayRoutines[0];
+        text = `Good morning${settings?.userName ? `, ${settings.userName}` : ''}. ${
+          firstRoutine
+            ? `Your first routine today is ${firstRoutine.title} at ${firstRoutine.time}.`
+            : 'Have a focused and energizing start to your day.'
+        }`;
+      }
+
+      if (cancelled || !text) return;
+      const cleanText = stripMarkdownForSpeech(text);
+      setBriefingText(cleanText);
+
+      try {
+        alarmAudio.setLoopVolume(duckedVolume);
+        setIsSpeakingVoice(true);
+        await speakText({
+          text: cleanText,
+          persona,
+          speechRate,
+          playbackId: `ringing_${alarm.id}`,
+          onEnded: () => {
+            alarmAudio.setLoopVolume(fullVolume);
+            if (!cancelled) setIsSpeakingVoice(false);
+          },
+        });
+      } catch {
+        // Silent fallback: restore ringtone volume and continue ringing uninterrupted
+        alarmAudio.setLoopVolume(fullVolume);
+        if (!cancelled) setIsSpeakingVoice(false);
+      }
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+      alarmAudio.setLoopVolume(fullVolume);
+      stopVoicePlayback();
+    };
+  }, [alarm, settings, routines]);
+
+  const handleToggleSpeak = async () => {
+    hapticsService.light();
+    if (isSpeakingVoice) {
+      stopVoicePlayback();
+      setIsSpeakingVoice(false);
+      return;
+    }
+
+    const persona = alarm.aiVoiceStyle || settings?.aiVoiceStyle || 'warm';
+    const speechRate = settings?.speechRate ?? 1.0;
+    try {
+      setIsSpeakingVoice(true);
+      await speakText({
+        text: briefingText,
+        persona,
+        speechRate,
+        onEnded: () => setIsSpeakingVoice(false),
+      });
+    } catch {
+      setIsSpeakingVoice(false);
+    }
+  };
 
   const handleSnooze = () => {
     hapticsService.medium();
     alarmAudio.stopAlarmLoop();
+    stopVoicePlayback();
     onSnooze(alarm.snoozeIntervalMinutes);
   };
 
   const handleDismiss = () => {
     hapticsService.success();
     alarmAudio.stopAlarmLoop();
+    stopVoicePlayback();
     onDismiss();
   };
 
   const hours = currentTime.getHours().toString().padStart(2, '0');
   const minutes = currentTime.getMinutes().toString().padStart(2, '0');
   const seconds = currentTime.getSeconds().toString().padStart(2, '0');
-
-  const briefingLines = [
-    "Good morning. It is time to begin your day with clarity and intention.",
-    "Today's forecast: 18°C, calm morning breeze, clear sunrise.",
-    "First routine at 07:00 AM: Hydration & Sunlight Protocol.",
-    "All alarms and schedule items synchronized. Have a wonderful day.",
-  ];
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-between bg-gradient-to-b from-[#1E1B4B] via-[#2E2F6B] to-[#1E1B4B] text-white p-6 sm:p-10 select-none overflow-hidden pt-safe pb-safe">
@@ -129,13 +246,27 @@ export const AlarmRingingScreen: React.FC<AlarmRingingScreenProps> = ({
 
         {/* AI Briefing Speech Area */}
         {alarm.aiBriefing && (
-          <div className="mt-8 max-w-md rounded-[28px] bg-white/10 border border-white/20 p-5 shadow-2xl backdrop-blur-md">
-            <div className="flex items-center gap-2 text-xs font-bold text-[#F5B800]">
-              <AiIcon className="h-4 w-4 animate-pulse" />
-              <span>AI Wake Morning Intelligence</span>
+          <div className="mt-8 w-full max-w-md rounded-[28px] bg-white/10 border border-white/20 p-5 shadow-2xl backdrop-blur-md text-left">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-bold text-[#F5B800]">
+                <AiIcon className="h-4 w-4 animate-pulse" />
+                <span>AI Wake Morning Intelligence</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleSpeak}
+                aria-label={isSpeakingVoice ? 'Stop voice briefing' : 'Play voice briefing'}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 hover:bg-white/25 text-white transition-colors"
+              >
+                {isSpeakingVoice ? (
+                  <VolumeX className="h-4 w-4" />
+                ) : (
+                  <Volume2 className="h-4 w-4" />
+                )}
+              </button>
             </div>
             <p className="mt-2 text-xs sm:text-sm text-white/95 leading-relaxed min-h-[44px]">
-              "{briefingLines[briefingStep]}"
+              "{briefingText}"
             </p>
           </div>
         )}

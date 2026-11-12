@@ -72,7 +72,7 @@ export const SchedulePage: React.FC<SchedulePageProps> = ({
   };
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-white text-[#1E1B4B] flex flex-col">
+    <div className="flex-1 min-h-0 flex flex-col bg-white text-[#1E1B4B]">
       {/* Top Bar with Back Arrow */}
       <PageHeader
         title="Schedule"
@@ -93,185 +93,187 @@ export const SchedulePage: React.FC<SchedulePageProps> = ({
         }
       />
 
-      <div className="mx-auto w-full max-w-xl px-4 py-5 space-y-4 flex-1">
-        {/* Horizontal Day Selector */}
-        <div className="rounded-[24px] bg-[#F3F3F5] p-2">
-          <div className="grid grid-cols-7 gap-1">
-            {DAYS_NAV.map((item) => {
-              const isSelected = selectedDay === item.dayIndex;
-              return (
-                <button
-                  key={item.dayIndex}
-                  type="button"
-                  onClick={() => {
-                    hapticsService.selection();
-                    onSelectDay(item.dayIndex);
-                  }}
-                  className={`flex min-h-[50px] flex-col items-center justify-center rounded-2xl transition-all ${
-                    isSelected
-                      ? 'bg-[#3B3D78] text-white shadow-md font-bold scale-102'
-                      : 'text-[#6B7280] hover:text-[#1E1B4B] font-semibold'
-                  }`}
-                >
-                  <span className="text-[10px] uppercase tracking-wider">{item.label}</span>
-                  <span className="text-sm font-mono-numbers">{item.short}</span>
-                </button>
-              );
-            })}
+      <main className="main-scroll-area">
+        <div className="mx-auto w-full max-w-xl px-4 py-5 space-y-4 pb-[calc(2rem+env(safe-area-inset-bottom,0px))]">
+          {/* Horizontal Day Selector */}
+          <div className="rounded-[24px] bg-[#F3F3F5] p-2">
+            <div className="grid grid-cols-7 gap-1">
+              {DAYS_NAV.map((item) => {
+                const isSelected = selectedDay === item.dayIndex;
+                return (
+                  <button
+                    key={item.dayIndex}
+                    type="button"
+                    onClick={() => {
+                      hapticsService.selection();
+                      onSelectDay(item.dayIndex);
+                    }}
+                    className={`touch-pan-y flex min-h-[50px] min-w-0 flex-col items-center justify-center rounded-2xl transition-all ${
+                      isSelected
+                        ? 'bg-[#3B3D78] text-white shadow-md font-bold scale-102'
+                        : 'text-[#6B7280] hover:text-[#1E1B4B] font-semibold'
+                    }`}
+                  >
+                    <span className="text-[10px] uppercase tracking-wider">{item.label}</span>
+                    <span className="text-sm font-mono-numbers">{item.short}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
 
-        {/* Progress & Summary Bar with SVG Circular Ring & Normal Font Done Count */}
-        <div className="flex items-center justify-between p-4 rounded-[24px] bg-[#F3F3F5] border border-gray-100">
-          <div className="flex items-center gap-3">
-            {/* SVG Progress Ring */}
-            <div className="relative h-10 w-10 flex items-center justify-center">
-              <svg className="h-10 w-10 transform -rotate-90" viewBox="0 0 36 36">
-                <circle
-                  cx="18"
-                  cy="18"
-                  r="14"
-                  fill="none"
-                  className="stroke-gray-300"
-                  strokeWidth="3.5"
-                />
-                <circle
-                  cx="18"
-                  cy="18"
-                  r="14"
-                  fill="none"
-                  className="stroke-[#9C1C7C] transition-all duration-300"
-                  strokeWidth="3.5"
-                  strokeDasharray={`${progressRatio * 88} 88`}
-                  strokeLinecap="round"
-                />
-              </svg>
-              <span className="absolute text-[10px] font-bold text-[#1E1B4B] font-sans">
-                {Math.round(progressRatio * 100)}%
+          {/* Progress & Summary Bar with SVG Circular Ring & Normal Font Done Count */}
+          <div className="flex items-center justify-between gap-2 p-4 rounded-[24px] bg-[#F3F3F5] border border-gray-100 touch-pan-y">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              {/* SVG Progress Ring */}
+              <div className="relative h-10 w-10 shrink-0 flex items-center justify-center">
+                <svg className="h-10 w-10 transform -rotate-90" viewBox="0 0 36 36">
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="14"
+                    fill="none"
+                    className="stroke-gray-300"
+                    strokeWidth="3.5"
+                  />
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="14"
+                    fill="none"
+                    className="stroke-[#9C1C7C] transition-all duration-300"
+                    strokeWidth="3.5"
+                    strokeDasharray={`${progressRatio * 88} 88`}
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <span className="absolute text-[10px] font-bold text-[#1E1B4B] font-sans">
+                  {Math.round(progressRatio * 100)}%
+                </span>
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <h3 className="text-xs font-bold text-[#1E1B4B] truncate">Daily Wake Protocol</h3>
+                <p className="text-[11px] text-[#6B7280] truncate">
+                  {dayRoutines.length} items planned today
+                </p>
+              </div>
+            </div>
+
+            <div className="shrink-0 text-right">
+              {/* Normal font, NOT monospace */}
+              <span className="text-xs font-extrabold text-[#9C1C7C] font-sans whitespace-nowrap">
+                {completedCount} of {dayRoutines.length} done
               </span>
             </div>
-
-            <div>
-              <h3 className="text-xs font-bold text-[#1E1B4B]">Daily Wake Protocol</h3>
-              <p className="text-[11px] text-[#6B7280]">
-                {dayRoutines.length} items planned today
-              </p>
-            </div>
           </div>
 
-          <div className="text-right">
-            {/* Normal font, NOT monospace */}
-            <span className="text-xs font-extrabold text-[#9C1C7C] font-sans">
-              {completedCount} of {dayRoutines.length} done
-            </span>
-          </div>
-        </div>
+          {/* Routine Timeline List */}
+          <div className="space-y-3">
+            {dayRoutines.length > 0 ? (
+              dayRoutines.map((routine) => {
+                const { icon: CatIcon, color: catColor } = getCategoryVisual(routine.category);
+                return (
+                  <div
+                    key={routine.id}
+                    onClick={() => {
+                      hapticsService.light();
+                      onToggleRoutine(routine.id);
+                    }}
+                    className={`touch-pan-y flex cursor-pointer items-start justify-between gap-2 rounded-[24px] border p-4 transition-all ${
+                      routine.completed
+                        ? 'border-gray-100 bg-[#F9FAFB] opacity-65'
+                        : 'border-gray-100 bg-white shadow-[0_4px_16px_rgba(30,27,75,0.05)] hover:border-gray-200'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      {/* Completion Checkmark */}
+                      <button
+                        type="button"
+                        aria-label={`Toggle completion of ${routine.title}`}
+                        className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center text-gray-400 hover:text-[#9C1C7C] transition-colors"
+                      >
+                        {routine.completed ? (
+                          <CheckCircle2 className="h-6 w-6 text-emerald-500 fill-emerald-50" />
+                        ) : (
+                          <Circle className="h-6 w-6 text-gray-300" />
+                        )}
+                      </button>
 
-        {/* Routine Timeline List */}
-        <div className="space-y-3 pb-24">
-          {dayRoutines.length > 0 ? (
-            dayRoutines.map((routine) => {
-              const { icon: CatIcon, color: catColor } = getCategoryVisual(routine.category);
-              return (
-                <div
-                  key={routine.id}
-                  onClick={() => {
-                    hapticsService.light();
-                    onToggleRoutine(routine.id);
-                  }}
-                  className={`flex cursor-pointer items-start justify-between rounded-[24px] border p-4 transition-all ${
-                    routine.completed
-                      ? 'border-gray-100 bg-[#F9FAFB] opacity-65'
-                      : 'border-gray-100 bg-white shadow-[0_4px_16px_rgba(30,27,75,0.05)] hover:border-gray-200'
-                  }`}
-                >
-                  <div className="flex items-start gap-3.5">
-                    {/* Completion Checkmark */}
-                    <button
-                      type="button"
-                      aria-label={`Toggle completion of ${routine.title}`}
-                      className="mt-1 flex h-6 w-6 items-center justify-center text-gray-400 hover:text-[#9C1C7C] transition-colors"
-                    >
-                      {routine.completed ? (
-                        <CheckCircle2 className="h-6 w-6 text-emerald-500 fill-emerald-50" />
-                      ) : (
-                        <Circle className="h-6 w-6 text-gray-300" />
-                      )}
-                    </button>
-
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <div
-                          className={`flex h-6 w-6 items-center justify-center rounded-lg ${catColor}`}
-                        >
-                          <CatIcon className="h-3.5 w-3.5" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div
+                            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${catColor}`}
+                          >
+                            <CatIcon className="h-3.5 w-3.5" />
+                          </div>
+                          <h3
+                            className={`text-sm font-bold truncate ${
+                              routine.completed ? 'line-through text-[#6B7280]' : 'text-[#1E1B4B]'
+                            }`}
+                          >
+                            {routine.title}
+                          </h3>
                         </div>
-                        <h3
-                          className={`text-sm font-bold ${
-                            routine.completed ? 'line-through text-[#6B7280]' : 'text-[#1E1B4B]'
-                          }`}
-                        >
-                          {routine.title}
-                        </h3>
-                      </div>
 
-                      {routine.notes && (
-                        <p className="mt-1 text-xs text-[#6B7280] max-w-sm">
-                          {routine.notes}
-                        </p>
-                      )}
+                        {routine.notes && (
+                          <p className="mt-1 text-xs text-[#6B7280] break-words">
+                            {routine.notes}
+                          </p>
+                        )}
 
-                      <div className="mt-2 flex items-center gap-2 text-xs font-medium text-[#6B7280]">
-                        <span className="font-mono-numbers font-bold text-[#9C1C7C]">
-                          {routine.time}
-                        </span>
-                        <span>·</span>
-                        <span>{routine.durationMinutes} min</span>
-                        <span>·</span>
-                        <span className="capitalize">{routine.category.replace('_', ' ')}</span>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium text-[#6B7280]">
+                          <span className="font-mono-numbers font-bold text-[#9C1C7C]">
+                            {routine.time}
+                          </span>
+                          <span>·</span>
+                          <span>{routine.durationMinutes} min</span>
+                          <span>·</span>
+                          <span className="capitalize">{routine.category.replace('_', ' ')}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      hapticsService.medium();
-                      onDeleteRoutine(routine.id);
-                    }}
-                    aria-label="Delete routine"
-                    className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        hapticsService.medium();
+                        onDeleteRoutine(routine.id);
+                      }}
+                      aria-label="Delete routine"
+                      className="flex min-h-[36px] min-w-[36px] shrink-0 items-center justify-center rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="flex flex-col items-center justify-center rounded-[28px] border-2 border-dashed border-gray-200 p-12 text-center">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#12A6A0]/10 text-[#12A6A0] mb-3">
+                  <Calendar className="h-8 w-8 stroke-[2]" />
                 </div>
-              );
-            })
-          ) : (
-            <div className="flex flex-col items-center justify-center rounded-[28px] border-2 border-dashed border-gray-200 p-12 text-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#12A6A0]/10 text-[#12A6A0] mb-3">
-                <Calendar className="h-8 w-8 stroke-[2]" />
+                <h3 className="text-base font-bold text-[#1E1B4B]">No routines for this day</h3>
+                <p className="mt-1 text-xs text-[#6B7280] max-w-xs">
+                  Establish morning routines or link habits to your wake-up time.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    hapticsService.light();
+                    setIsAddModalOpen(true);
+                  }}
+                  className="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-2xl bg-[#3B3D78] hover:bg-[#2E2F6B] px-5 text-xs font-bold text-white shadow-md transition-colors"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Add First Routine</span>
+                </button>
               </div>
-              <h3 className="text-base font-bold text-[#1E1B4B]">No routines for this day</h3>
-              <p className="mt-1 text-xs text-[#6B7280] max-w-xs">
-                Establish morning routines or link habits to your wake-up time.
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  hapticsService.light();
-                  setIsAddModalOpen(true);
-                }}
-                className="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-2xl bg-[#3B3D78] hover:bg-[#2E2F6B] px-5 text-xs font-bold text-white shadow-md transition-colors"
-              >
-                <Plus className="h-4 w-4" />
-                <span>Add First Routine</span>
-              </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      </div>
+      </main>
 
       <AddRoutineModal
         isOpen={isAddModalOpen}

@@ -1,0 +1,214 @@
+name: Build Android APK & Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Setup JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web bundle
+        env:
+          VITE_GEMINI_TEXT_KEY: ${{ secrets.VITE_GEMINI_TEXT_KEY }}
+          VITE_GEMINI_VOICE_KEY: ${{ secrets.VITE_GEMINI_VOICE_KEY }}
+        run: npm run build
+
+      - name: Add Capacitor Android platform if missing
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+
+      - name: Apply native-overlay/android over android/
+        run: |
+          cp -r native-overlay/android/* android/
+          rm -f android/app/src/main/java/com/aiwake/app/MainActivity.java
+
+      - name: Configure Kotlin, WorkManager, SDK versions, and app versioning
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+          REF_NAME: ${{ github.ref_name }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          node -e '
+            const fs = require("fs");
+
+            // 1. Ensure Kotlin Gradle plugin in root android/build.gradle
+            let rootGradle = fs.readFileSync("android/build.gradle", "utf8");
+            if (!rootGradle.includes("kotlin-gradle-plugin")) {
+              rootGradle = rootGradle.replace(
+                /classpath\s+["\x27]com\.android\.tools\.build:gradle:[^"\x27]+["\x27]/,
+                (m) => `${m}\n        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0"`
+              );
+              fs.writeFileSync("android/build.gradle", rootGradle);
+            }
+
+            // 2. Ensure minSdk 24 and latest Capacitor 8 compileSdk/targetSdk (36)
+            if (fs.existsSync("android/variables.gradle")) {
+              let varsGradle = fs.readFileSync("android/variables.gradle", "utf8");
+              varsGradle = varsGradle
+                .replace(/minSdkVersion\s*=\s*\d+/, "minSdkVersion = 24")
+                .replace(/compileSdkVersion\s*=\s*\d+/, "compileSdkVersion = 36")
+                .replace(/targetSdkVersion\s*=\s*\d+/, "targetSdkVersion = 36");
+              fs.writeFileSync("android/variables.gradle", varsGradle);
+            }
+
+            // 3. Patch android/app/build.gradle for Kotlin, WorkManager, versionCode, versionName
+            let appGradle = fs.readFileSync("android/app/build.gradle", "utf8");
+            if (!appGradle.includes("kotlin-android")) {
+              appGradle = appGradle.replace(
+                "apply plugin: \x27com.android.application\x27",
+                "apply plugin: \x27com.android.application\x27\napply plugin: \x27kotlin-android\x27"
+              );
+            }
+            if (!appGradle.includes("androidx.work:work-runtime")) {
+              appGradle = appGradle.replace(
+                "dependencies {",
+                "dependencies {\n    implementation \"androidx.work:work-runtime:2.9.1\""
+              );
+            }
+
+            const runNum = Number(process.env.RUN_NUMBER || 1);
+            const rawRef = process.env.REF_NAME || "";
+            const isTag = process.env.IS_TAG === "true";
+            const versionName = isTag ? rawRef.replace(/^v/, "") : `1.0.${runNum}`;
+
+            appGradle = appGradle
+              .replace(/versionCode\s+\d+/, `versionCode ${runNum}`)
+              .replace(/versionName\s+"[^"]+"/, `versionName "${versionName}"`);
+
+            fs.writeFileSync("android/app/build.gradle", appGradle);
+            console.log(`Configured Android build: versionCode=${runNum}, versionName=${versionName}`);
+          '
+
+      - name: Generate Android icons and splash screens
+        run: npm run assets
+
+      - name: Sync web bundle and Capacitor plugins to Android
+        run: npx cap sync android
+
+      - name: Build Debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload Debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIWake-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Check signing secrets for release tag
+        id: signing_check
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASS" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASS" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Signing secrets missing; skipping signed release APK/AAB."
+          fi
+
+      - name: Decode keystore and configure release signing
+        if: startsWith(github.ref, 'refs/tags/v') && steps.signing_check.outputs.ready == 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 --decode > android/app/release.keystore
+          node -e '
+            const fs = require("fs");
+            let appGradle = fs.readFileSync("android/app/build.gradle", "utf8");
+            const signingBlock = `    signingConfigs {
+        release {
+            storeFile file("release.keystore")
+            storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            keyAlias System.getenv("ANDROID_KEY_ALIAS")
+            keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+        }
+    }
+    buildTypes {`;
+            if (!appGradle.includes("signingConfigs")) {
+              appGradle = appGradle.replace("    buildTypes {", signingBlock);
+            }
+            appGradle = appGradle.replace(
+              /buildTypes\s*\{\s*release\s*\{/,
+              "buildTypes {\n        release {\n            signingConfig signingConfigs.release"
+            );
+            fs.writeFileSync("android/app/build.gradle", appGradle);
+          '
+
+      - name: Build Signed Release APK and Play Store AAB
+        if: startsWith(github.ref, 'refs/tags/v') && steps.signing_check.outputs.ready == 'true'
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease bundleRelease
+
+      - name: Remove decoded keystore
+        if: always()
+        run: rm -f android/app/release.keystore
+
+      - name: Upload Signed Release APK artifact
+        if: startsWith(github.ref, 'refs/tags/v') && steps.signing_check.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIWake-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Upload Play Store AAB artifact
+        if: startsWith(github.ref, 'refs/tags/v') && steps.signing_check.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIWake-release-aab
+          path: android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+
+      - name: Attach Release APK and AAB to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') && steps.signing_check.outputs.ready == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab

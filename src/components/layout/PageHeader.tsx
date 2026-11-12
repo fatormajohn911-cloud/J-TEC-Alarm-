@@ -15,28 +15,28 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   rightAction,
 }) => {
   return (
-    <header className="sticky top-0 z-30 w-full bg-gradient-to-r from-[#3F4080] via-[#353676] to-[#2E2F6B] text-white pt-safe shadow-sm">
-      <div className="mx-auto flex h-16 max-w-xl items-center justify-between px-4">
+    <header className="relative z-30 shrink-0 w-full bg-gradient-to-r from-[#3F4080] via-[#353676] to-[#2E2F6B] text-white pt-safe shadow-sm">
+      <div className="mx-auto flex h-16 max-w-xl items-center justify-between gap-2 px-4">
         {/* Left: Back button + Title */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
           <button
             type="button"
             onClick={onBack}
             aria-label="Back to Home"
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-all text-white"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition-all text-white"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <div>
-            <h1 className="text-lg font-bold tracking-tight text-white">{title}</h1>
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold tracking-tight text-white truncate">{title}</h1>
             {subtitle && (
-              <p className="text-[11px] text-purple-200/80 font-medium">{subtitle}</p>
+              <p className="text-[11px] text-purple-200/80 font-medium truncate">{subtitle}</p>
             )}
           </div>
         </div>
 
         {/* Right Action slot if any */}
-        {rightAction && <div className="flex items-center">{rightAction}</div>}
+        {rightAction && <div className="flex shrink-0 items-center">{rightAction}</div>}
       </div>
     </header>
   );

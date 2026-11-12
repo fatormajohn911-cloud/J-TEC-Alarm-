@@ -32,7 +32,7 @@ export const AlarmCard: React.FC<AlarmCardProps> = ({
 
   return (
     <div
-      className={`relative overflow-hidden rounded-[24px] border transition-all duration-200 ${
+      className={`relative overflow-clip rounded-[24px] border transition-all duration-200 touch-pan-y ${
         alarm.enabled
           ? 'bg-white border-gray-100 shadow-[0_4px_20px_rgba(30,27,75,0.06)]'
           : 'bg-[#F9FAFB] border-gray-100 opacity-70'
@@ -40,8 +40,8 @@ export const AlarmCard: React.FC<AlarmCardProps> = ({
     >
       <div className="p-4 sm:p-5">
         {/* Top row: Time + Toggle Switch */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <div
               className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full ${
                 alarm.enabled ? 'bg-[#9C1C7C]/15 text-[#9C1C7C]' : 'bg-gray-100 text-gray-400'
@@ -50,7 +50,7 @@ export const AlarmCard: React.FC<AlarmCardProps> = ({
               <AlarmClock className="h-6 w-6 stroke-[2]" />
             </div>
 
-            <div>
+            <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-1.5">
                 <span
                   className={`font-mono-numbers text-2xl sm:text-3xl font-extrabold tracking-tight ${
@@ -65,13 +65,13 @@ export const AlarmCard: React.FC<AlarmCardProps> = ({
                   </span>
                 )}
               </div>
-              <h3 className="text-sm font-bold text-[#1E1B4B] truncate max-w-[160px] sm:max-w-xs mt-0.5">
+              <h3 className="text-sm font-bold text-[#1E1B4B] truncate mt-0.5">
                 {alarm.label || 'Alarm'}
               </h3>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <ToggleSwitch
               checked={alarm.enabled}
               onChange={() => onToggle(alarm.id)}
@@ -119,7 +119,13 @@ export const AlarmCard: React.FC<AlarmCardProps> = ({
                 <span>·</span>
                 <span className="flex items-center gap-1 text-[#9C1C7C] font-semibold">
                   <AiIcon className="h-3.5 w-3.5" />
-                  AI Briefing
+                  <span>
+                    AI Briefing · {alarm.briefingReady ? (
+                      <span className="text-emerald-600">Ready</span>
+                    ) : (
+                      <span className="text-[#6B7280] font-medium">Will prepare before alarm</span>
+                    )}
+                  </span>
                 </span>
               </>
             )}

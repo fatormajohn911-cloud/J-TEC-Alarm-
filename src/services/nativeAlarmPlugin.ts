@@ -15,6 +15,21 @@ export interface ScheduleAlarmOptions {
   aiVoiceStyle?: string;
 }
 
+export interface BriefingContextPayload {
+  userName: string;
+  routines: Array<{
+    time: string;
+    title: string;
+    durationMinutes: number;
+    dayOfWeek: number;
+  }>;
+  serverUrl: string;
+  includeWeather: boolean;
+  includeCalendar: boolean;
+  includeMotivation: boolean;
+  voiceStyle: string;
+}
+
 export interface PermissionStatus {
   exactAlarm: boolean;
   batteryExempt: boolean;
@@ -23,11 +38,19 @@ export interface PermissionStatus {
 }
 
 export interface AlarmPluginInterface {
-  scheduleAlarm(options: ScheduleAlarmOptions): Promise<{ success: boolean; scheduledTimeMillis?: number }>;
+  scheduleAlarm(options: ScheduleAlarmOptions): Promise<{
+    success: boolean;
+    scheduledTimeMillis?: number;
+    briefingReady?: boolean;
+  }>;
   cancelAlarm(options: { id: string }): Promise<{ success: boolean }>;
   getScheduledAlarms(): Promise<{ alarms: Alarm[] }>;
+  getBriefingStatus(options: { id: string }): Promise<{ ready: boolean }>;
+  syncBriefingContext(options: BriefingContextPayload): Promise<{ success: boolean }>;
   checkPermissions(): Promise<PermissionStatus>;
+  requestNotificationPermission(): Promise<{ granted: boolean }>;
   requestExactAlarmPermission(): Promise<{ granted: boolean }>;
+  requestFullScreenIntentPermission(): Promise<{ granted: boolean }>;
   requestBatteryOptimizationExemption(): Promise<{ granted: boolean }>;
   testTriggerAlarm(options: { id: string }): Promise<{ success: boolean }>;
 }
@@ -40,10 +63,14 @@ class AlarmAudioEngine {
   private ctx: AudioContext | null = null;
   private isPlaying = false;
   private loopInterval: number | null = null;
+  private loopSoundId = 'aurora';
+  private loopVolume = 85;
 
   private initCtx() {
     if (!this.ctx) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {
         this.ctx = new AudioCtx();
       }
@@ -64,8 +91,7 @@ class AlarmAudioEngine {
     const now = this.ctx.currentTime;
 
     if (soundId === 'zen_harp') {
-      // Harp arpeggio: C4, E4, G4, B4, C5
-      const notes = [261.63, 329.63, 392.00, 493.88, 523.25];
+      const notes = [261.63, 329.63, 392.0, 493.88, 523.25];
       notes.forEach((freq, i) => {
         const osc = this.ctx!.createOscillator();
         const noteGain = this.ctx!.createGain();
@@ -80,11 +106,10 @@ class AlarmAudioEngine {
         osc.stop(now + i * 0.12 + 1.3);
       });
     } else if (soundId === 'pulse') {
-      // Progressive energetic pulse
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(587.33, now); // D5
+      osc.frequency.setValueAtTime(587.33, now);
       gain.gain.setValueAtTime(0.3, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
       osc.connect(gain);
@@ -92,7 +117,6 @@ class AlarmAudioEngine {
       osc.start(now);
       osc.stop(now + 0.5);
     } else {
-      // Aurora Sunrise (default): serene ambient chords (A4, C#5, E5, G#5)
       const freqs = [440, 554.37, 659.25, 830.61];
       freqs.forEach((freq) => {
         const osc = this.ctx!.createOscillator();
@@ -120,14 +144,20 @@ class AlarmAudioEngine {
   }
 
   startAlarmLoop(soundId: string, volume: number = 85) {
+    this.loopSoundId = soundId;
+    this.loopVolume = volume;
     if (this.isPlaying) return;
     this.isPlaying = true;
-    this.playTone(soundId, volume);
+    this.playTone(this.loopSoundId, this.loopVolume);
     this.loopInterval = window.setInterval(() => {
       if (this.isPlaying) {
-        this.playTone(soundId, volume);
+        this.playTone(this.loopSoundId, this.loopVolume);
       }
     }, 2800);
+  }
+
+  setLoopVolume(volume: number) {
+    this.loopVolume = Math.max(0, Math.min(100, volume));
   }
 
   stopAlarmLoop() {
@@ -141,19 +171,59 @@ class AlarmAudioEngine {
 
 export const alarmAudio = new AlarmAudioEngine();
 
+const WEB_BRIEFING_READY_PREFIX = 'ai_wake_briefing_ready_';
+const WEB_BRIEFING_TEXT_PREFIX = 'ai_wake_briefing_text_';
+
+export function getWebPreparedBriefingText(alarmId: string): string | null {
+  try {
+    return localStorage.getItem(`${WEB_BRIEFING_TEXT_PREFIX}${alarmId}`);
+  } catch {
+    return null;
+  }
+}
+
+export function setWebPreparedBriefing(alarmId: string, text: string): void {
+  try {
+    localStorage.setItem(`${WEB_BRIEFING_READY_PREFIX}${alarmId}`, '1');
+    localStorage.setItem(`${WEB_BRIEFING_TEXT_PREFIX}${alarmId}`, text);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function clearWebPreparedBriefing(alarmId: string): void {
+  try {
+    localStorage.removeItem(`${WEB_BRIEFING_READY_PREFIX}${alarmId}`);
+    localStorage.removeItem(`${WEB_BRIEFING_TEXT_PREFIX}${alarmId}`);
+  } catch {
+    // ignore
+  }
+}
+
 /**
- * Fallback Web Implementation of the Alarm Plugin when running in browser preview.
- * Strictly adheres to architectural clarity: marks whether native Android AlarmManager
- * is available or running in web preview mode.
+ * Web Adapter Implementation of the Alarm Plugin when running in browser preview.
  */
 class AlarmPluginWeb implements AlarmPluginInterface {
-  async scheduleAlarm(options: ScheduleAlarmOptions): Promise<{ success: boolean; scheduledTimeMillis?: number }> {
-    console.info('[AI Wake Web Bridge] Staging alarm via Web Adapter:', options.id, options.time);
-    return { success: true, scheduledTimeMillis: Date.now() + 3600000 };
+  async scheduleAlarm(options: ScheduleAlarmOptions): Promise<{
+    success: boolean;
+    scheduledTimeMillis?: number;
+    briefingReady?: boolean;
+  }> {
+    let briefingReady = false;
+    try {
+      briefingReady = localStorage.getItem(`${WEB_BRIEFING_READY_PREFIX}${options.id}`) === '1';
+    } catch {
+      briefingReady = false;
+    }
+    return {
+      success: true,
+      scheduledTimeMillis: Date.now() + 3600000,
+      briefingReady,
+    };
   }
 
   async cancelAlarm(options: { id: string }): Promise<{ success: boolean }> {
-    console.info('[AI Wake Web Bridge] Cancelling alarm:', options.id);
+    clearWebPreparedBriefing(options.id);
     return { success: true };
   }
 
@@ -161,16 +231,51 @@ class AlarmPluginWeb implements AlarmPluginInterface {
     return { alarms: [] };
   }
 
+  async getBriefingStatus(options: { id: string }): Promise<{ ready: boolean }> {
+    try {
+      return { ready: localStorage.getItem(`${WEB_BRIEFING_READY_PREFIX}${options.id}`) === '1' };
+    } catch {
+      return { ready: false };
+    }
+  }
+
+  async syncBriefingContext(options: BriefingContextPayload): Promise<{ success: boolean }> {
+    try {
+      localStorage.setItem('ai_wake_native_briefing_ctx', JSON.stringify(options));
+    } catch {
+      // ignore
+    }
+    return { success: true };
+  }
+
   async checkPermissions(): Promise<PermissionStatus> {
+    const notifications =
+      typeof Notification !== 'undefined' ? Notification.permission === 'granted' : true;
     return {
       exactAlarm: true,
       batteryExempt: true,
-      notifications: typeof Notification !== 'undefined' && Notification.permission === 'granted',
+      notifications,
       fullScreenIntent: true,
     };
   }
 
+  async requestNotificationPermission(): Promise<{ granted: boolean }> {
+    if (typeof Notification !== 'undefined' && Notification.requestPermission) {
+      try {
+        const res = await Notification.requestPermission();
+        return { granted: res === 'granted' };
+      } catch {
+        return { granted: false };
+      }
+    }
+    return { granted: true };
+  }
+
   async requestExactAlarmPermission(): Promise<{ granted: boolean }> {
+    return { granted: true };
+  }
+
+  async requestFullScreenIntentPermission(): Promise<{ granted: boolean }> {
     return { granted: true };
   }
 
@@ -178,13 +283,11 @@ class AlarmPluginWeb implements AlarmPluginInterface {
     return { granted: true };
   }
 
-  async testTriggerAlarm(options: { id: string }): Promise<{ success: boolean }> {
-    console.info('[AI Wake Web Bridge] Test triggering alarm:', options.id);
+  async testTriggerAlarm(_options: { id: string }): Promise<{ success: boolean }> {
     return { success: true };
   }
 }
 
-// Register with Capacitor native plugins
 const NativeAlarmPluginProxy = registerPlugin<AlarmPluginInterface>('AlarmPlugin', {
   web: () => new AlarmPluginWeb(),
 });
@@ -202,12 +305,28 @@ export const NativeAlarm = {
     return NativeAlarmPluginProxy.cancelAlarm({ id });
   },
 
+  async getBriefingStatus(id: string): Promise<{ ready: boolean }> {
+    return NativeAlarmPluginProxy.getBriefingStatus({ id });
+  },
+
+  async syncBriefingContext(payload: BriefingContextPayload) {
+    return NativeAlarmPluginProxy.syncBriefingContext(payload);
+  },
+
   async checkPermissions(): Promise<PermissionStatus> {
     return NativeAlarmPluginProxy.checkPermissions();
   },
 
+  async requestNotification() {
+    return NativeAlarmPluginProxy.requestNotificationPermission();
+  },
+
   async requestExactAlarm() {
     return NativeAlarmPluginProxy.requestExactAlarmPermission();
+  },
+
+  async requestFullScreenIntent() {
+    return NativeAlarmPluginProxy.requestFullScreenIntentPermission();
   },
 
   async requestBatteryExempt() {

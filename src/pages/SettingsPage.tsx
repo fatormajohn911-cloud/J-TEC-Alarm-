@@ -1,9 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppSettings } from '../types/settings';
 import { ToggleSwitch } from '../components/common/ToggleSwitch';
-import { alarmAudio, NativeAlarm } from '../services/nativeAlarmPlugin';
+import { NativeAlarm } from '../services/nativeAlarmPlugin';
 import { PageHeader } from '../components/layout/PageHeader';
 import { hapticsService } from '../services/hapticsService';
+import {
+  playTestTone,
+  stopVoicePlayback,
+  getVoiceCacheStats,
+  clearVoiceCache,
+  formatBytes,
+} from '../services/geminiVoice';
 import {
   Sliders,
   Volume2,
@@ -15,15 +22,17 @@ import {
   Info,
   Star,
   MessageSquare,
-  ShieldAlert,
+  Trash2,
   X,
 } from 'lucide-react';
 import { AiIcon } from '../components/common/AiIcon';
+import { AppLogo } from '../components/common/AppLogo';
 
 interface SettingsPageProps {
   settings: AppSettings;
   onBack: () => void;
   onUpdateSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
+  onRefreshPermissions: () => Promise<void>;
   onResetAll: () => void;
 }
 
@@ -31,37 +40,89 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   settings,
   onBack,
   onUpdateSetting,
+  onRefreshPermissions,
   onResetAll,
 }) => {
   const [testingVoice, setTestingVoice] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceCacheStats, setVoiceCacheStats] = useState<{
+    totalBytes: number;
+    clipCount: number;
+  }>({ totalBytes: 0, clipCount: 0 });
   const [activeModal, setActiveModal] = useState<'privacy' | 'rate' | 'feedback' | null>(null);
 
-  const handleTestVoiceTone = () => {
+  const refreshCacheStats = async () => {
+    const stats = await getVoiceCacheStats();
+    setVoiceCacheStats(stats);
+  };
+
+  useEffect(() => {
+    refreshCacheStats();
+    return () => {
+      stopVoicePlayback();
+    };
+  }, []);
+
+  const handleTestVoiceTone = async () => {
     hapticsService.light();
+    if (testingVoice) {
+      stopVoicePlayback();
+      setTestingVoice(false);
+      return;
+    }
+
+    setVoiceError(null);
     setTestingVoice(true);
-    alarmAudio.playTone('aurora', 80);
-    setTimeout(() => setTestingVoice(false), 2400);
+    try {
+      await playTestTone(settings.aiVoiceStyle, settings.speechRate, () => {
+        setTestingVoice(false);
+      });
+      refreshCacheStats();
+    } catch (err) {
+      setTestingVoice(false);
+      setVoiceError(
+        err instanceof Error ? err.message : 'Unable to preview AI voice right now.'
+      );
+      setTimeout(() => setVoiceError(null), 4000);
+    }
+  };
+
+  const handleClearVoiceCache = async () => {
+    hapticsService.medium();
+    stopVoicePlayback();
+    await clearVoiceCache();
+    await refreshCacheStats();
+    setFeedbackSuccess('Voice audio cache cleared.');
+    setTimeout(() => setFeedbackSuccess(null), 3000);
   };
 
   const handleRequestExactAlarm = async () => {
     hapticsService.light();
-    const res = await NativeAlarm.requestExactAlarm();
-    onUpdateSetting('exactAlarmPermission', res.granted);
-    setFeedbackSuccess('Exact alarm permission verified.');
-    setTimeout(() => setFeedbackSuccess(null), 3000);
+    await NativeAlarm.requestExactAlarm();
+    await onRefreshPermissions();
   };
 
   const handleRequestBatteryExemption = async () => {
     hapticsService.light();
-    const res = await NativeAlarm.requestBatteryExempt();
-    onUpdateSetting('batteryOptimizationExempt', res.granted);
-    setFeedbackSuccess('Battery optimization exemption verified.');
-    setTimeout(() => setFeedbackSuccess(null), 3000);
+    await NativeAlarm.requestBatteryExempt();
+    await onRefreshPermissions();
+  };
+
+  const handleRequestNotification = async () => {
+    hapticsService.light();
+    await NativeAlarm.requestNotification();
+    await onRefreshPermissions();
+  };
+
+  const handleRequestFullScreenIntent = async () => {
+    hapticsService.light();
+    await NativeAlarm.requestFullScreenIntent();
+    await onRefreshPermissions();
   };
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-white text-[#1E1B4B] flex flex-col">
+    <div className="flex-1 min-h-0 flex flex-col bg-white text-[#1E1B4B]">
       {/* Top Bar with Back Arrow */}
       <PageHeader
         title="Settings"
@@ -69,7 +130,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         onBack={onBack}
       />
 
-      <div className="mx-auto w-full max-w-xl px-4 py-5 space-y-5 flex-1 pb-28">
+      <main className="main-scroll-area">
+        <div className="mx-auto w-full max-w-xl px-4 py-5 space-y-5 pb-[calc(2rem+env(safe-area-inset-bottom,0px))]">
         {feedbackSuccess && (
           <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-800 font-bold">
             <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
@@ -143,9 +205,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               className="flex min-h-[36px] items-center gap-1.5 rounded-full bg-[#F3F3F5] hover:bg-gray-200 px-3.5 py-1 text-xs font-bold text-[#3B3D78] transition-colors"
             >
               <Play className="h-3 w-3 fill-current text-[#9C1C7C]" />
-              <span>{testingVoice ? 'Playing...' : 'Test Tone'}</span>
+              <span>{testingVoice ? 'Stop' : 'Test Tone'}</span>
             </button>
           </div>
+
+          {voiceError && (
+            <div className="mt-3 flex items-center gap-2 rounded-xl bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-700">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span>{voiceError}</span>
+            </div>
+          )}
 
           <div className="mt-4 space-y-4">
             <div>
@@ -192,6 +261,58 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 onChange={(e) => onUpdateSetting('speechRate', parseFloat(e.target.value))}
                 className="mt-2 w-full accent-[#9C1C7C] cursor-pointer"
               />
+            </div>
+          </div>
+        </section>
+
+        {/* 2B. AI ASSISTANT & CACHE SECTION */}
+        <section className="rounded-[28px] bg-white border border-gray-100 p-5 shadow-[0_4px_20px_rgba(30,27,75,0.04)]">
+          <div className="flex items-center gap-2.5 pb-3 border-b border-gray-100">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#3B3D78]/10 text-[#3B3D78]">
+              <AiIcon className="h-4 w-4" />
+            </div>
+            <h3 className="text-sm font-bold text-[#1E1B4B]">AI</h3>
+          </div>
+
+          <div className="mt-4 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <span className="text-xs sm:text-sm font-bold text-[#1E1B4B]">
+                  Ask before applying changes
+                </span>
+                <p className="text-[11px] text-[#6B7280]">
+                  Show alarm & schedule proposals before saving
+                </p>
+              </div>
+              <ToggleSwitch
+                checked={settings.askBeforeApplyingChanges ?? true}
+                onChange={(val) => {
+                  hapticsService.light();
+                  onUpdateSetting('askBeforeApplyingChanges', val);
+                }}
+                label="Ask before applying changes"
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-3 pt-2 border-t border-gray-100">
+              <div className="min-w-0 flex-1">
+                <span className="text-xs sm:text-sm font-bold text-[#1E1B4B]">
+                  Voice audio cache
+                </span>
+                <p className="text-[11px] text-[#6B7280]">
+                  {formatBytes(voiceCacheStats.totalBytes)} cached · {voiceCacheStats.clipCount}{' '}
+                  {voiceCacheStats.clipCount === 1 ? 'clip' : 'clips'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleClearVoiceCache}
+                disabled={voiceCacheStats.clipCount === 0}
+                className="shrink-0 flex min-h-[38px] items-center gap-1.5 rounded-2xl bg-[#F3F3F5] hover:bg-gray-200 disabled:opacity-45 px-3.5 py-1.5 text-xs font-bold text-[#1E1B4B] transition-colors"
+              >
+                <Trash2 className="h-3.5 w-3.5 text-[#9C1C7C]" />
+                <span>Clear voice cache</span>
+              </button>
             </div>
           </div>
         </section>
@@ -253,32 +374,32 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <h3 className="text-sm font-bold text-[#1E1B4B]">Alarm Reliability</h3>
           </div>
 
-          <p className="mt-3 text-xs text-[#6B7280] leading-relaxed">
-            AI Wake registers alarms with <code className="text-[#9C1C7C] font-semibold">AlarmManager.setAlarmClock()</code>. Each permission below is critical for guaranteed waking:
+          <p className="mt-3 text-xs text-[#6B7280] leading-relaxed break-words">
+            AI Wake registers alarms with <code className="text-[#9C1C7C] font-semibold break-all">AlarmManager.setAlarmClock()</code>. Each permission below is critical for guaranteed waking:
           </p>
 
           <div className="mt-4 space-y-2.5">
             {/* Perm 1: Exact Alarms */}
             <div className="flex items-center justify-between gap-3 rounded-2xl bg-[#F3F3F5] p-3.5">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <span
-                  className={`h-2.5 w-2.5 rounded-full ${
+                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${
                     settings.exactAlarmPermission ? 'bg-emerald-500' : 'bg-red-500'
                   }`}
                 />
-                <div>
+                <div className="min-w-0">
                   <span className="text-xs font-bold text-[#1E1B4B]">Exact Alarms</span>
-                  <p className="text-[10px] text-[#6B7280]">SCHEDULE_EXACT_ALARM</p>
+                  <p className="text-[10px] text-[#6B7280] truncate">SCHEDULE_EXACT_ALARM</p>
                 </div>
               </div>
 
               {settings.exactAlarmPermission ? (
-                <span className="text-xs font-bold text-emerald-600">Active</span>
+                <span className="shrink-0 text-xs font-bold text-emerald-600">Active</span>
               ) : (
                 <button
                   type="button"
                   onClick={handleRequestExactAlarm}
-                  className="rounded-xl bg-[#3B3D78] text-white px-3 py-1 text-xs font-bold"
+                  className="shrink-0 rounded-xl bg-[#3B3D78] text-white px-3 py-1 text-xs font-bold"
                 >
                   Fix
                 </button>
@@ -287,25 +408,25 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
 
             {/* Perm 2: Battery Optimization */}
             <div className="flex items-center justify-between gap-3 rounded-2xl bg-[#F3F3F5] p-3.5">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <span
-                  className={`h-2.5 w-2.5 rounded-full ${
+                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${
                     settings.batteryOptimizationExempt ? 'bg-emerald-500' : 'bg-amber-500'
                   }`}
                 />
-                <div>
+                <div className="min-w-0">
                   <span className="text-xs font-bold text-[#1E1B4B]">Battery Exemption</span>
-                  <p className="text-[10px] text-[#6B7280]">Prevents OEM killing</p>
+                  <p className="text-[10px] text-[#6B7280] truncate">Prevents OEM killing</p>
                 </div>
               </div>
 
               {settings.batteryOptimizationExempt ? (
-                <span className="text-xs font-bold text-emerald-600">Active</span>
+                <span className="shrink-0 text-xs font-bold text-emerald-600">Active</span>
               ) : (
                 <button
                   type="button"
                   onClick={handleRequestBatteryExemption}
-                  className="rounded-xl bg-[#3B3D78] text-white px-3 py-1 text-xs font-bold"
+                  className="shrink-0 rounded-xl bg-[#3B3D78] text-white px-3 py-1 text-xs font-bold"
                 >
                   Fix
                 </button>
@@ -314,39 +435,59 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
 
             {/* Perm 3: Notifications */}
             <div className="flex items-center justify-between gap-3 rounded-2xl bg-[#F3F3F5] p-3.5">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <span
-                  className={`h-2.5 w-2.5 rounded-full ${
+                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${
                     settings.notificationPermission ? 'bg-emerald-500' : 'bg-amber-500'
                   }`}
                 />
-                <div>
+                <div className="min-w-0">
                   <span className="text-xs font-bold text-[#1E1B4B]">Notifications</span>
-                  <p className="text-[10px] text-[#6B7280]">Heads-up snooze banners</p>
+                  <p className="text-[10px] text-[#6B7280] truncate">Upcoming alerts & snooze controls</p>
                 </div>
               </div>
-              <span className="text-xs font-bold text-emerald-600">Active</span>
+              {settings.notificationPermission ? (
+                <span className="shrink-0 text-xs font-bold text-emerald-600">Active</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleRequestNotification}
+                  className="shrink-0 rounded-xl bg-[#3B3D78] text-white px-3 py-1 text-xs font-bold"
+                >
+                  Fix
+                </button>
+              )}
             </div>
 
             {/* Perm 4: Full Screen Lock Intent */}
             <div className="flex items-center justify-between gap-3 rounded-2xl bg-[#F3F3F5] p-3.5">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <span
-                  className={`h-2.5 w-2.5 rounded-full ${
+                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${
                     settings.fullScreenIntentPermission ? 'bg-emerald-500' : 'bg-red-500'
                   }`}
                 />
-                <div>
+                <div className="min-w-0">
                   <span className="text-xs font-bold text-[#1E1B4B]">Full-Screen Alert</span>
-                  <p className="text-[10px] text-[#6B7280]">Displays over lock screen</p>
+                  <p className="text-[10px] text-[#6B7280] truncate">Displays over lock screen</p>
                 </div>
               </div>
-              <span className="text-xs font-bold text-emerald-600">Active</span>
+              {settings.fullScreenIntentPermission ? (
+                <span className="shrink-0 text-xs font-bold text-emerald-600">Active</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleRequestFullScreenIntent}
+                  className="shrink-0 rounded-xl bg-[#3B3D78] text-white px-3 py-1 text-xs font-bold"
+                >
+                  Fix
+                </button>
+              )}
             </div>
           </div>
         </section>
 
-        {/* 5. ABOUT SECTION (App Version, Privacy Policy, Rate the app, Send feedback) */}
+        {/* 5. ABOUT SECTION (Logo, App Version, Privacy Policy, Rate the app, Send feedback) */}
         <section className="rounded-[28px] bg-white border border-gray-100 p-5 shadow-[0_4px_20px_rgba(30,27,75,0.04)]">
           <div className="flex items-center gap-2.5 pb-3 border-b border-gray-100">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#F57C1F]/10 text-[#F57C1F]">
@@ -355,10 +496,21 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <h3 className="text-sm font-bold text-[#1E1B4B]">About</h3>
           </div>
 
-          <div className="mt-3 divide-y divide-gray-100">
+          <div className="mt-3 flex items-center gap-3 rounded-2xl bg-[#F3F3F5] p-3.5">
+            <AppLogo className="h-11 w-11 rounded-xl shrink-0 shadow-xs" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-extrabold text-[#1E1B4B]">AI Wake</div>
+              <div className="text-[11px] font-medium text-[#6B7280]">
+                Smart Alarm & Morning Briefing Assistant
+              </div>
+            </div>
+            <span className="shrink-0 text-[11px] font-mono font-bold text-[#6B7280]">v1.0.0</span>
+          </div>
+
+          <div className="mt-2 divide-y divide-gray-100">
             <div className="flex items-center justify-between py-3">
-              <span className="text-xs font-bold text-[#1E1B4B]">Version</span>
-              <span className="text-xs font-mono font-bold text-[#6B7280]">v1.0.0 (Build 102)</span>
+              <span className="text-xs font-bold text-[#1E1B4B]">Build</span>
+              <span className="text-xs font-mono font-bold text-[#6B7280]">102</span>
             </div>
 
             <button
@@ -395,8 +547,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             </button>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
-            <div>
+          <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
               <span className="text-xs font-bold text-[#1E1B4B]">Reset Stored Data</span>
               <p className="text-[11px] text-[#6B7280]">Clears local alarms and routines</p>
             </div>
@@ -406,14 +558,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 hapticsService.medium();
                 onResetAll();
               }}
-              className="flex min-h-[44px] items-center gap-1.5 rounded-2xl bg-red-50 hover:bg-red-100 px-4 py-2 text-xs font-bold text-red-600 transition-colors"
+              className="shrink-0 flex min-h-[44px] items-center gap-1.5 rounded-2xl bg-red-50 hover:bg-red-100 px-4 py-2 text-xs font-bold text-red-600 transition-colors"
             >
               <RotateCcw className="h-3.5 w-3.5" />
               <span>Reset</span>
             </button>
           </div>
         </section>
-      </div>
+        </div>
+      </main>
 
       {/* Modal Dialogs for About Items */}
       {activeModal && (

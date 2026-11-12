@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { AppSettings } from '../../types/settings';
 import { hapticsService } from '../../services/hapticsService';
 import {
-  AlarmClock,
   ShieldCheck,
-  CheckCircle2,
   ArrowRight,
   ArrowLeft,
   Volume2,
@@ -14,32 +13,37 @@ import {
   Clock,
 } from 'lucide-react';
 import { AiIcon } from '../common/AiIcon';
+import { AppLogo } from '../common/AppLogo';
+
+export type ReliabilityPermissionType =
+  | 'exact'
+  | 'notifications'
+  | 'fullscreen'
+  | 'battery';
 
 interface OnboardingModalProps {
   isOpen: boolean;
   initialName?: string;
+  settings: AppSettings;
+  onRequestPermission: (type: ReliabilityPermissionType) => Promise<void>;
   onComplete: (userName: string) => void;
 }
 
 export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   isOpen,
-  initialName = 'Alex',
+  initialName = '',
+  settings,
+  onRequestPermission,
   onComplete,
 }) => {
   const [step, setStep] = useState(0);
-  const [name, setName] = useState(initialName);
-  const [allowedPerms, setAllowedPerms] = useState<Record<string, boolean>>({
-    exact: true,
-    notifications: true,
-    fullscreen: true,
-    battery: true,
-  });
+  const [name, setName] = useState(initialName === 'Alex' ? '' : initialName);
 
   if (!isOpen) return null;
 
-  const togglePerm = (perm: string) => {
+  const handlePermissionPress = async (type: ReliabilityPermissionType) => {
     hapticsService.light();
-    setAllowedPerms((prev) => ({ ...prev, [perm]: !prev[perm] }));
+    await onRequestPermission(type);
   };
 
   const handleNext = () => {
@@ -48,7 +52,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       setStep(step + 1);
     } else {
       hapticsService.success();
-      onComplete(name.trim() || 'Alex');
+      onComplete(name.trim() || 'Friend');
     }
   };
 
@@ -79,9 +83,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             <div
               key={idx}
               className={`h-2 rounded-full transition-all duration-300 ${
-                step === idx
-                  ? 'w-7 bg-[#9C1C7C]'
-                  : 'w-2 bg-gray-200'
+                step === idx ? 'w-7 bg-[#9C1C7C]' : 'w-2 bg-gray-200'
               }`}
             />
           ))}
@@ -91,7 +93,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           type="button"
           onClick={() => {
             hapticsService.light();
-            onComplete(name.trim() || 'Alex');
+            onComplete(name.trim() || 'Friend');
           }}
           className="text-xs font-bold text-[#6B7280] hover:text-[#1E1B4B]"
         >
@@ -111,9 +113,9 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               transition={{ duration: 0.25 }}
               className="space-y-6 text-center"
             >
-              {/* Icon Illustration */}
-              <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-tr from-[#3F4080] to-[#9C1C7C] text-white shadow-xl shadow-indigo-900/20">
-                <AlarmClock className="h-12 w-12 stroke-[2]" />
+              {/* Brand App Logo */}
+              <div className="mx-auto flex items-center justify-center">
+                <AppLogo className="h-24 w-24 rounded-[28px] shadow-xl shadow-indigo-900/20" />
               </div>
 
               <div>
@@ -163,7 +165,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   Spoken AI Morning Briefings
                 </h1>
                 <p className="mt-2 text-sm text-[#6B7280] leading-relaxed">
-                  Wake up to more than a loud buzzer. AI Wake delivers personalized spoken morning intelligence directly upon rising.
+                  Wake up to more than a loud buzzer. AI Wake prepares your personalized morning briefing before your alarm and plays it offline at wake-up.
                 </p>
               </div>
 
@@ -218,13 +220,13 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   Uncompromising Reliability
                 </h1>
                 <p className="mt-1 text-xs text-[#6B7280]">
-                  Why AI Wake needs four standard Android permissions to ring reliably:
+                  Grant these four Android permissions so your alarms always ring on time:
                 </p>
               </div>
 
-              {/* 4 Permissions list */}
+              {/* 4 Live Permissions list */}
               <div className="space-y-2.5">
-                {/* Perm 1 */}
+                {/* Perm 1: Exact Alarms */}
                 <div className="flex items-center justify-between p-3 rounded-2xl bg-[#F3F3F5] border border-gray-100">
                   <div className="flex items-start gap-2.5 pr-2">
                     <Clock className="h-4 w-4 text-[#3B3D78] mt-0.5 shrink-0" />
@@ -237,42 +239,42 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => togglePerm('exact')}
+                    onClick={() => handlePermissionPress('exact')}
                     className={`shrink-0 min-h-[36px] px-3 rounded-xl text-xs font-bold transition-colors ${
-                      allowedPerms.exact
+                      settings.exactAlarmPermission
                         ? 'bg-emerald-100 text-emerald-800'
                         : 'bg-[#3B3D78] text-white'
                     }`}
                   >
-                    {allowedPerms.exact ? 'Allowed' : 'Allow'}
+                    {settings.exactAlarmPermission ? 'Allowed' : 'Allow'}
                   </button>
                 </div>
 
-                {/* Perm 2 */}
+                {/* Perm 2: Notifications */}
                 <div className="flex items-center justify-between p-3 rounded-2xl bg-[#F3F3F5] border border-gray-100">
                   <div className="flex items-start gap-2.5 pr-2">
                     <Bell className="h-4 w-4 text-[#9C1C7C] mt-0.5 shrink-0" />
                     <div>
                       <h4 className="text-xs font-bold text-[#1E1B4B]">Notifications</h4>
                       <p className="text-[11px] text-[#6B7280] leading-tight">
-                        Provides upcoming alarm heads-up and snooze controls.
+                        Shows upcoming alarm alerts and snooze/dismiss controls.
                       </p>
                     </div>
                   </div>
                   <button
                     type="button"
-                    onClick={() => togglePerm('notifications')}
+                    onClick={() => handlePermissionPress('notifications')}
                     className={`shrink-0 min-h-[36px] px-3 rounded-xl text-xs font-bold transition-colors ${
-                      allowedPerms.notifications
+                      settings.notificationPermission
                         ? 'bg-emerald-100 text-emerald-800'
                         : 'bg-[#3B3D78] text-white'
                     }`}
                   >
-                    {allowedPerms.notifications ? 'Allowed' : 'Allow'}
+                    {settings.notificationPermission ? 'Allowed' : 'Allow'}
                   </button>
                 </div>
 
-                {/* Perm 3 */}
+                {/* Perm 3: Full-Screen Alerts */}
                 <div className="flex items-center justify-between p-3 rounded-2xl bg-[#F3F3F5] border border-gray-100">
                   <div className="flex items-start gap-2.5 pr-2">
                     <Maximize2 className="h-4 w-4 text-[#12A6A0] mt-0.5 shrink-0" />
@@ -285,18 +287,18 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => togglePerm('fullscreen')}
+                    onClick={() => handlePermissionPress('fullscreen')}
                     className={`shrink-0 min-h-[36px] px-3 rounded-xl text-xs font-bold transition-colors ${
-                      allowedPerms.fullscreen
+                      settings.fullScreenIntentPermission
                         ? 'bg-emerald-100 text-emerald-800'
                         : 'bg-[#3B3D78] text-white'
                     }`}
                   >
-                    {allowedPerms.fullscreen ? 'Allowed' : 'Allow'}
+                    {settings.fullScreenIntentPermission ? 'Allowed' : 'Allow'}
                   </button>
                 </div>
 
-                {/* Perm 4 */}
+                {/* Perm 4: Battery Exemption */}
                 <div className="flex items-center justify-between p-3 rounded-2xl bg-[#F3F3F5] border border-gray-100">
                   <div className="flex items-start gap-2.5 pr-2">
                     <BatteryCharging className="h-4 w-4 text-[#F57C1F] mt-0.5 shrink-0" />
@@ -309,14 +311,14 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => togglePerm('battery')}
+                    onClick={() => handlePermissionPress('battery')}
                     className={`shrink-0 min-h-[36px] px-3 rounded-xl text-xs font-bold transition-colors ${
-                      allowedPerms.battery
+                      settings.batteryOptimizationExempt
                         ? 'bg-emerald-100 text-emerald-800'
                         : 'bg-[#3B3D78] text-white'
                     }`}
                   >
-                    {allowedPerms.battery ? 'Allowed' : 'Allow'}
+                    {settings.batteryOptimizationExempt ? 'Allowed' : 'Allow'}
                   </button>
                 </div>
               </div>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108" fill="none">
+  <defs>
+    <linearGradient id="indigoGradBg" x1="0" y1="0" x2="108" y2="108" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3F4080" />
+      <stop offset="100%" stop-color="#2E2F6B" />
+    </linearGradient>
+  </defs>
+  <rect width="108" height="108" fill="url(#indigoGradBg)" />
+</svg>

@@ -25,7 +25,7 @@ export function useSchedule() {
   const addRoutine = useCallback((routine: Omit<ScheduleRoutine, 'id'>) => {
     const newRoutine: ScheduleRoutine = {
       ...routine,
-      id: `routine_${Date.now()}`,
+      id: `routine_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     };
     setRoutines((prev) => [...prev, newRoutine]);
     return newRoutine;

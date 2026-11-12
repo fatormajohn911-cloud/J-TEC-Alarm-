@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" fill="none">
+  <defs>
+    <linearGradient id="indigoGrad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3F4080" />
+      <stop offset="100%" stop-color="#2E2F6B" />
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded-square indigo gradient background -->
+  <rect width="512" height="512" rx="116" fill="url(#indigoGrad)" />
+
+  <!-- Two small alarm bells on top -->
+  <path
+    d="M126 154C126 124 150 100 180 100C194 100 207 105 216 114"
+    stroke="#FFFFFF"
+    stroke-width="26"
+    stroke-linecap="round"
+  />
+  <path
+    d="M386 154C386 124 362 100 332 100C318 100 305 105 296 114"
+    stroke="#FFFFFF"
+    stroke-width="26"
+    stroke-linecap="round"
+  />
+
+  <!-- Two subtle clock feet -->
+  <path
+    d="M168 378L142 406"
+    stroke="#FFFFFF"
+    stroke-width="26"
+    stroke-linecap="round"
+  />
+  <path
+    d="M344 378L370 406"
+    stroke="#FFFFFF"
+    stroke-width="26"
+    stroke-linecap="round"
+  />
+
+  <!-- Centered white alarm clock outline -->
+  <circle
+    cx="256"
+    cy="272"
+    r="126"
+    stroke="#FFFFFF"
+    stroke-width="26"
+  />
+
+  <!-- Three vertical rounded voice-wave bars in plum #9C1C7C -->
+  <rect x="200" y="236" width="24" height="72" rx="12" fill="#9C1C7C" />
+  <rect x="244" y="206" width="24" height="132" rx="12" fill="#9C1C7C" />
+  <rect x="288" y="224" width="24" height="96" rx="12" fill="#9C1C7C" />
+</svg>

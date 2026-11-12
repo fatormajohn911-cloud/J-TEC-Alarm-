@@ -18,6 +18,8 @@ export interface AppSettings {
   // User personalization
   userName: string;
   onboardingCompleted: boolean;
+  // AI assistant behavior
+  askBeforeApplyingChanges: boolean;
   // UI Display mode
   deviceFrameMockup: boolean;
 }
@@ -25,6 +27,7 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   userName: 'Alex',
   onboardingCompleted: false,
+  askBeforeApplyingChanges: true,
   timeFormat24h: false,
   showSeconds: true,
   hapticFeedback: true,
