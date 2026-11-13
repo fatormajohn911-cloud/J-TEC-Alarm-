@@ -64,7 +64,6 @@ jobs:
         run: |
           node -e '
             const fs = require("fs");
-
             // 1. Ensure Kotlin Gradle plugin in root android/build.gradle
             let rootGradle = fs.readFileSync("android/build.gradle", "utf8");
             if (!rootGradle.includes("kotlin-gradle-plugin")) {
@@ -74,8 +73,7 @@ jobs:
               );
               fs.writeFileSync("android/build.gradle", rootGradle);
             }
-
-            // 2. Ensure minSdk 24 and latest Capacitor 8 compileSdk/targetSdk (36)
+            // 2. Ensure minSdk 24 and compileSdk/targetSdk 36
             if (fs.existsSync("android/variables.gradle")) {
               let varsGradle = fs.readFileSync("android/variables.gradle", "utf8");
               varsGradle = varsGradle
@@ -84,7 +82,6 @@ jobs:
                 .replace(/targetSdkVersion\s*=\s*\d+/, "targetSdkVersion = 36");
               fs.writeFileSync("android/variables.gradle", varsGradle);
             }
-
             // 3. Patch android/app/build.gradle for Kotlin, WorkManager, versionCode, versionName
             let appGradle = fs.readFileSync("android/app/build.gradle", "utf8");
             if (!appGradle.includes("kotlin-android")) {
@@ -99,16 +96,13 @@ jobs:
                 "dependencies {\n    implementation \"androidx.work:work-runtime:2.9.1\""
               );
             }
-
             const runNum = Number(process.env.RUN_NUMBER || 1);
             const rawRef = process.env.REF_NAME || "";
             const isTag = process.env.IS_TAG === "true";
             const versionName = isTag ? rawRef.replace(/^v/, "") : `1.0.${runNum}`;
-
             appGradle = appGradle
               .replace(/versionCode\s+\d+/, `versionCode ${runNum}`)
               .replace(/versionName\s+"[^"]+"/, `versionName "${versionName}"`);
-
             fs.writeFileSync("android/app/build.gradle", appGradle);
             console.log(`Configured Android build: versionCode=${runNum}, versionName=${versionName}`);
           '
@@ -171,15 +165,17 @@ jobs:
           node -e '
             const fs = require("fs");
             let appGradle = fs.readFileSync("android/app/build.gradle", "utf8");
-            const signingBlock = `    signingConfigs {
-        release {
-            storeFile file("release.keystore")
-            storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
-            keyAlias System.getenv("ANDROID_KEY_ALIAS")
-            keyPassword System.getenv("ANDROID_KEY_PASSWORD")
-        }
-    }
-    buildTypes {`;
+            const signingBlock = [
+              "    signingConfigs {",
+              "        release {",
+              "            storeFile file(\x27release.keystore\x27)",
+              "            storePassword System.getenv(\x27ANDROID_KEYSTORE_PASSWORD\x27)",
+              "            keyAlias System.getenv(\x27ANDROID_KEY_ALIAS\x27)",
+              "            keyPassword System.getenv(\x27ANDROID_KEY_PASSWORD\x27)",
+              "        }",
+              "    }",
+              "    buildTypes {"
+            ].join("\n");
             if (!appGradle.includes("signingConfigs")) {
               appGradle = appGradle.replace("    buildTypes {", signingBlock);
             }
