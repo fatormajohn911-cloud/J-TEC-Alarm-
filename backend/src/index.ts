@@ -18,12 +18,35 @@ const REQUIRED_ENV_VARS = [
   'ALLOWED_ORIGINS',
 ] as const;
 
+function cleanEnvValue(raw: string | undefined): string {
+  if (!raw) return '';
+  let cleaned = raw.trim();
+  while (
+    cleaned.length >= 2 &&
+    ((cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+      (cleaned.startsWith("'") && cleaned.endsWith("'")))
+  ) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  return cleaned.replace(/^["']+|["']+$/g, '').trim();
+}
+
+function parseModelListEnv(raw: string | undefined): string[] | undefined {
+  const cleaned = cleanEnvValue(raw);
+  if (!cleaned) return undefined;
+  const list = cleaned
+    .split(',')
+    .map((entry) => cleanEnvValue(entry))
+    .filter(Boolean);
+  return list.length > 0 ? list : undefined;
+}
+
 function readRequiredEnv(): Record<(typeof REQUIRED_ENV_VARS)[number], string> {
   const missing: string[] = [];
   const envMap = {} as Record<(typeof REQUIRED_ENV_VARS)[number], string>;
 
   for (const name of REQUIRED_ENV_VARS) {
-    const val = process.env[name]?.trim();
+    const val = cleanEnvValue(process.env[name]);
     if (!val) {
       missing.push(name);
     } else {
@@ -42,6 +65,13 @@ function readRequiredEnv(): Record<(typeof REQUIRED_ENV_VARS)[number], string> {
 }
 
 const ENV = readRequiredEnv();
+
+console.log(
+  `Text key: length ${ENV.GEMINI_TEXT_KEY.length}, starts with AIza: ${ENV.GEMINI_TEXT_KEY.startsWith('AIza')}`
+);
+console.log(
+  `Voice key: length ${ENV.GEMINI_VOICE_KEY.length}, starts with AIza: ${ENV.GEMINI_VOICE_KEY.startsWith('AIza')}`
+);
 
 export const APP_CONFIG = {
   minAppVersion: '1.0.0',
@@ -316,7 +346,15 @@ const quotaService = new QuotaService(
   ENV.UPSTASH_REDIS_REST_URL,
   ENV.UPSTASH_REDIS_REST_TOKEN
 );
-const geminiService = new GeminiService(ENV.GEMINI_TEXT_KEY, ENV.GEMINI_VOICE_KEY);
+const geminiService = new GeminiService(
+  ENV.GEMINI_TEXT_KEY,
+  ENV.GEMINI_VOICE_KEY,
+  {
+    chatModels: parseModelListEnv(process.env.CHAT_MODELS),
+    guardModels: parseModelListEnv(process.env.GUARD_MODELS),
+    voiceModels: parseModelListEnv(process.env.VOICE_MODELS),
+  }
+);
 
 const app = new Hono();
 
@@ -490,7 +528,8 @@ v1.post('/chat', async (c) => {
       return errorJson(
         err.errorCode,
         err.message,
-        err.errorCode === 'timeout' ? 504 : 502
+        err.errorCode === 'timeout' ? 504 : 502,
+        { upstreamStatus: err.upstreamStatus }
       );
     }
     return errorJson(
@@ -590,7 +629,8 @@ v1.post('/speak', async (c) => {
       return errorJson(
         err.errorCode,
         err.message,
-        err.errorCode === 'timeout' ? 504 : 502
+        err.errorCode === 'timeout' ? 504 : 502,
+        { upstreamStatus: err.upstreamStatus }
       );
     }
     return errorJson(
@@ -605,7 +645,7 @@ app.route('/v1', v1);
 
 app.notFound(() => errorJson('invalid_request', 'Endpoint not found.', 404));
 
-const port = Number(process.env.PORT || 3000);
+const port = Number(cleanEnvValue(process.env.PORT) || 3000);
 serve({
   fetch: app.fetch,
   port,
