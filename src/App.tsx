@@ -17,6 +17,13 @@ import { NotificationDrawer } from './components/layout/NotificationDrawer';
 import { AlarmFormModal } from './components/alarm/AlarmFormModal';
 import { OnboardingModal, ReliabilityPermissionType } from './components/onboarding/OnboardingModal';
 import { alarmAudio, NativeAlarm } from './services/nativeAlarmPlugin';
+import {
+  BackendStateSnapshot,
+  fetchBackendConfig,
+  getBackendStateSnapshot,
+  subscribeBackendState,
+  warmUpBackend,
+} from './services/apiClient';
 
 // Pages
 import { HomePage } from './pages/HomePage';
@@ -33,8 +40,22 @@ export default function App() {
   const [ringingAlarm, setRingingAlarm] = useState<Alarm | null>(null);
   const [isNewAlarmModalOpen, setIsNewAlarmModalOpen] = useState(false);
   const [editingAlarm, setEditingAlarm] = useState<Alarm | null>(null);
+  const [backendState, setBackendState] = useState<BackendStateSnapshot>(() =>
+    getBackendStateSnapshot()
+  );
 
   const pwa = usePWA();
+
+  // Warm up backend and fetch /v1/config on startup
+  useEffect(() => {
+    const unsub = subscribeBackendState(setBackendState);
+    warmUpBackend();
+    fetchBackendConfig();
+    return unsub;
+  }, []);
+
+  const aiEnabled = backendState.config ? backendState.config.aiEnabled : true;
+  const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.0.0';
 
   const handleWebAlarmTrigger = useCallback((alarm: Alarm) => {
     setRingingAlarm((curr) => curr || alarm);
@@ -245,6 +266,7 @@ export default function App() {
             alarm={ringingAlarm}
             settings={settings}
             routines={routines}
+            aiEnabled={aiEnabled}
             onDismiss={() => setRingingAlarm(null)}
             onSnooze={(minutes) => {
               if (ringingAlarm) {
@@ -253,6 +275,29 @@ export default function App() {
               setRingingAlarm(null);
             }}
           />
+        ) : backendState.updateRequired ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center bg-white">
+            <div className="w-full max-w-sm rounded-[28px] border border-indigo-100 bg-[#F3F3F5] p-6 shadow-sm space-y-4">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#3B3D78] text-white">
+                <RefreshCw className="h-6 w-6" />
+              </div>
+              <div className="space-y-1.5">
+                <h2 className="text-lg font-extrabold text-[#1E1B4B]">
+                  Please update the app
+                </h2>
+                <p className="text-xs text-[#6B7280] leading-relaxed">
+                  A newer version of AI Wake ({backendState.config?.minAppVersion}) is required to continue using online features. You are currently on v{appVersion}.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="w-full min-h-[44px] rounded-2xl bg-[#3B3D78] hover:bg-[#2E2F6B] text-white text-xs font-bold shadow-sm transition-colors"
+              >
+                Reload to check for update
+              </button>
+            </div>
+          </div>
         ) : (
           <>
             {/* 1. FIRST-RUN ONBOARDING (shown once until completed) */}
@@ -271,6 +316,7 @@ export default function App() {
                   nextAlarmInfo={nextAlarmInfo}
                   activeAlarms={alarms}
                   settings={settings}
+                  aiEnabled={aiEnabled}
                   onToggleAlarm={toggleAlarm}
                   onOpenCreateAlarm={() => {
                     setEditingAlarm(null);
@@ -319,6 +365,7 @@ export default function App() {
                 alarms={alarms}
                 routines={routines}
                 settings={settings}
+                aiEnabled={aiEnabled}
                 onBack={navigateBackToHome}
                 onAddAlarm={addAlarm}
                 onUpdateAlarm={updateAlarm}
@@ -361,6 +408,7 @@ export default function App() {
               <SettingsPage
                 settings={settings}
                 pwa={pwa}
+                aiEnabled={aiEnabled}
                 scrollTarget={settingsScrollTarget}
                 onClearScrollTarget={() => setSettingsScrollTarget(null)}
                 onBack={navigateBackToHome}

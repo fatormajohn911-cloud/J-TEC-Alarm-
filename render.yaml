@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: aiwake-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /v1/health
+    autoDeploy: true
+    envVars:
+      - key: GEMINI_TEXT_KEY
+        sync: false
+      - key: GEMINI_VOICE_KEY
+        sync: false
+      - key: TOKEN_SIGNING_SECRET
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false

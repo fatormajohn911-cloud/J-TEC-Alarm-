@@ -140,16 +140,35 @@ export function parseAiErrorDetails(err: unknown): ParsedAiError {
     };
   }
 
-  if (errCode === 'MISSING_KEY' || combinedUpper.includes('NOT CONFIGURED') || combinedUpper.includes('KEY IS MISSING')) {
+  if (errCode === 'unconfigured' || errCode === 'MISSING_KEY' || combinedUpper.includes('NOT CONFIGURED') || combinedUpper.includes('KEY IS MISSING')) {
     return {
       category: 'missing_key',
-      plainReason: 'Missing API key. Add your Gemini API key in Settings > Developer / API Keys.',
+      plainReason: 'AI is not configured on this build. Add a developer API key in Settings > Developer / API Keys or configure VITE_API_BASE_URL.',
       httpStatus,
-      apiMessage: cleanApiMsg || 'API key is not configured.',
+      apiMessage: cleanApiMsg || 'API is not configured.',
+    };
+  }
+
+  if (errCode === 'ai_disabled') {
+    return {
+      category: 'unknown',
+      plainReason: 'AI features are temporarily paused by the server.',
+      httpStatus: httpStatus ?? 503,
+      apiMessage: cleanApiMsg || 'AI features are temporarily disabled.',
+    };
+  }
+
+  if (errCode === 'timeout' || httpStatus === 504) {
+    return {
+      category: 'network_error',
+      plainReason: 'The AI server took too long to respond (it may be waking up). Please try again.',
+      httpStatus: httpStatus ?? 504,
+      apiMessage: cleanApiMsg || 'Request timed out.',
     };
   }
 
   if (
+    errCode === 'quota_exceeded' ||
     httpStatus === 429 ||
     combinedUpper.includes('RESOURCE_EXHAUSTED') ||
     combinedUpper.includes('QUOTA') ||
@@ -158,7 +177,10 @@ export function parseAiErrorDetails(err: unknown): ParsedAiError {
   ) {
     return {
       category: 'quota_exceeded',
-      plainReason: 'Quota exceeded for this API key. Wait a bit, check billing/limits, or switch keys.',
+      plainReason:
+        errCode === 'quota_exceeded'
+          ? "You've reached today's AI limit. It resets tomorrow."
+          : 'Quota exceeded. Wait a bit or try again tomorrow.',
       httpStatus: httpStatus ?? 429,
       apiMessage: cleanApiMsg || 'Quota exceeded.',
     };

@@ -32,10 +32,10 @@ import {
 } from '../components/assistant/AssistantCards';
 import { hapticsService } from '../services/hapticsService';
 import {
-  checkServerTextAvailable,
   getTextKeyStatus,
   isTextKeyMissingError,
 } from '../services/geminiText';
+import { hasBackendConfigured } from '../services/apiClient';
 import {
   buildCopyableAiErrorReport,
   copyTextToClipboard,
@@ -66,6 +66,7 @@ interface AssistantPageProps {
   alarms: Alarm[];
   routines: ScheduleRoutine[];
   settings: AppSettings;
+  aiEnabled?: boolean;
   onBack: () => void;
   onAddAlarm: (alarm: Omit<Alarm, 'id' | 'createdAt'>) => Promise<Alarm>;
   onUpdateAlarm: (alarm: Alarm) => Promise<void>;
@@ -170,6 +171,7 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
   alarms,
   routines,
   settings,
+  aiEnabled = true,
   onBack,
   onAddAlarm,
   onUpdateAlarm,
@@ -242,19 +244,7 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
 
   useEffect(() => {
     const status = getTextKeyStatus();
-    if (status.isSet) {
-      setIsAiMissingSetup(false);
-      return;
-    }
-    let cancelled = false;
-    checkServerTextAvailable().then((serverReady) => {
-      if (!cancelled) {
-        setIsAiMissingSetup(!serverReady);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
+    setIsAiMissingSetup(!status.isSet && !hasBackendConfigured());
   }, []);
 
   useEffect(() => {
@@ -346,7 +336,7 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
   };
 
   const handleSendMessage = async (textOverride?: string) => {
-    if (inFlightRef.current || assistantState === 'thinking') return;
+    if (!aiEnabled || inFlightRef.current || assistantState === 'thinking') return;
     const raw = textOverride !== undefined ? textOverride : inputText;
     const text = raw.trim();
     if (!text) return;
@@ -718,7 +708,7 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
   const userName = (settings.userName || '').trim() || 'there';
   const isReplying = assistantState === 'thinking';
   const hasUserMessage = messages.some((m) => m.sender === 'user');
-  const canSend = inputText.trim().length > 0 && !isReplying;
+  const canSend = aiEnabled && inputText.trim().length > 0 && !isReplying;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-white text-[#1E1B4B]">
@@ -1070,8 +1060,27 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
             </motion.div>
           )}
 
+          {/* Friendly "AI features paused" Card when aiEnabled is false */}
+          {!aiEnabled && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 rounded-[24px] border border-amber-200 bg-amber-50/70 p-5 text-center space-y-2"
+            >
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
+                <AlertCircle className="h-5 w-5" />
+              </div>
+              <h3 className="text-sm font-extrabold text-[#1E1B4B]">
+                AI features are temporarily paused
+              </h3>
+              <p className="text-xs text-[#6B7280] leading-relaxed">
+                Your alarms and daily schedule continue to work normally offline and on schedule. Please check back later for AI chat and voice briefings.
+              </p>
+            </motion.div>
+          )}
+
           {/* Friendly "AI is not set up yet" Card */}
-          {isAiMissingSetup && (
+          {aiEnabled && isAiMissingSetup && (
             <motion.div
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1085,7 +1094,7 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
                   AI is not set up yet
                 </h3>
                 <p className="text-xs text-[#6B7280] leading-relaxed">
-                  Add a Gemini Text API key in Developer / API Keys to chat, plan routines, and generate morning briefings.
+                  Add a Gemini Text API key in Developer / API Keys to test locally when no backend URL is configured.
                 </p>
               </div>
               {onOpenApiKeySettings && (
@@ -1188,85 +1197,87 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
       </main>
 
       {/* Bottom Composer Pinned Outside Scroll Area */}
-      <div className="shrink-0 bg-white pt-2 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] border-t border-gray-100">
-        {/* Horizontal Suggestion Chips: hidden after first user message & while replying */}
-        {!hasUserMessage && !isReplying && (
-          <div className="mx-auto w-full max-w-xl">
-            <div className="flex items-center gap-2 overflow-x-auto px-4 pb-2.5 touch-pan-x">
-              {QUICK_CHIPS.map((chip) => (
-                <button
-                  key={chip}
-                  type="button"
-                  onClick={() => handleSendMessage(chip)}
-                  className="shrink-0 rounded-full bg-[#F3F3F5] hover:bg-gray-200 px-3.5 py-1.5 text-xs font-semibold text-[#3B3D78] transition-colors active:scale-95"
-                >
-                  {chip}
-                </button>
-              ))}
+      {aiEnabled && (
+        <div className="shrink-0 bg-white pt-2 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] border-t border-gray-100">
+          {/* Horizontal Suggestion Chips: hidden after first user message & while replying */}
+          {!hasUserMessage && !isReplying && (
+            <div className="mx-auto w-full max-w-xl">
+              <div className="flex items-center gap-2 overflow-x-auto px-4 pb-2.5 touch-pan-x">
+                {QUICK_CHIPS.map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => handleSendMessage(chip)}
+                    className="shrink-0 rounded-full bg-[#F3F3F5] hover:bg-gray-200 px-3.5 py-1.5 text-xs font-semibold text-[#3B3D78] transition-colors active:scale-95"
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Input Row */}
-        <div className="mx-auto w-full max-w-xl px-4">
-          <div className="flex items-end gap-2">
-            {/* Mic Button (Web Speech API) */}
-            <button
-              type="button"
-              onClick={handleToggleMic}
-              aria-label={
-                assistantState === 'listening'
-                  ? 'Stop voice input'
-                  : 'Start voice input'
-              }
-              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all ${
-                assistantState === 'listening'
-                  ? 'bg-red-500 text-white animate-pulse shadow-md shadow-red-500/30'
-                  : 'bg-[#F3F3F5] text-[#3B3D78] hover:bg-gray-200 active:scale-95'
-              }`}
-            >
-              {assistantState === 'listening' ? (
-                <MicOff className="h-5 w-5" />
-              ) : (
-                <Mic className="h-5 w-5" />
-              )}
-            </button>
+          {/* Input Row */}
+          <div className="mx-auto w-full max-w-xl px-4">
+            <div className="flex items-end gap-2">
+              {/* Mic Button (Web Speech API) */}
+              <button
+                type="button"
+                onClick={handleToggleMic}
+                aria-label={
+                  assistantState === 'listening'
+                    ? 'Stop voice input'
+                    : 'Start voice input'
+                }
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all ${
+                  assistantState === 'listening'
+                    ? 'bg-red-500 text-white animate-pulse shadow-md shadow-red-500/30'
+                    : 'bg-[#F3F3F5] text-[#3B3D78] hover:bg-gray-200 active:scale-95'
+                }`}
+              >
+                {assistantState === 'listening' ? (
+                  <MicOff className="h-5 w-5" />
+                ) : (
+                  <Mic className="h-5 w-5" />
+                )}
+              </button>
 
-            {/* Single-line input that grows up to 4 lines as user types */}
-            <div className="flex-1 min-w-0 rounded-[24px] bg-[#F3F3F5] px-4 py-1 focus-within:bg-white focus-within:ring-2 focus-within:ring-[#3B3D78]/30 transition-all">
-              <textarea
-                ref={textareaRef}
-                rows={1}
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    if (canSend) handleSendMessage();
-                  }
-                }}
-                placeholder="Ask about your mornings and routines"
-                className="block w-full h-10 max-h-[104px] overflow-y-auto resize-none bg-transparent py-2 text-xs sm:text-sm leading-5 text-[#1E1B4B] placeholder:text-gray-400 placeholder:whitespace-nowrap focus:outline-none"
-              />
+              {/* Single-line input that grows up to 4 lines as user types */}
+              <div className="flex-1 min-w-0 rounded-[24px] bg-[#F3F3F5] px-4 py-1 focus-within:bg-white focus-within:ring-2 focus-within:ring-[#3B3D78]/30 transition-all">
+                <textarea
+                  ref={textareaRef}
+                  rows={1}
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      if (canSend) handleSendMessage();
+                    }
+                  }}
+                  placeholder="Ask about your mornings and routines"
+                  className="block w-full h-10 max-h-[104px] overflow-y-auto resize-none bg-transparent py-2 text-xs sm:text-sm leading-5 text-[#1E1B4B] placeholder:text-gray-400 placeholder:whitespace-nowrap focus:outline-none"
+                />
+              </div>
+
+              {/* Send Button: solid indigo when text present, soft gray when empty/waiting */}
+              <button
+                type="button"
+                onClick={() => handleSendMessage()}
+                disabled={!canSend}
+                aria-label="Send message"
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all ${
+                  canSend
+                    ? 'bg-[#3B3D78] hover:bg-[#2E2F6B] text-white shadow-md active:scale-95'
+                    : 'bg-[#F3F3F5] text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                <ArrowUp className="h-5 w-5 stroke-[2.5]" />
+              </button>
             </div>
-
-            {/* Send Button: solid indigo when text present, soft gray when empty/waiting */}
-            <button
-              type="button"
-              onClick={() => handleSendMessage()}
-              disabled={!canSend}
-              aria-label="Send message"
-              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all ${
-                canSend
-                  ? 'bg-[#3B3D78] hover:bg-[#2E2F6B] text-white shadow-md active:scale-95'
-                  : 'bg-[#F3F3F5] text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              <ArrowUp className="h-5 w-5 stroke-[2.5]" />
-            </button>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

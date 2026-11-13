@@ -37,8 +37,7 @@ jobs:
 
       - name: Build web bundle
         env:
-          VITE_GEMINI_TEXT_KEY: ${{ secrets.VITE_GEMINI_TEXT_KEY }}
-          VITE_GEMINI_VOICE_KEY: ${{ secrets.VITE_GEMINI_VOICE_KEY }}
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
         run: npm run build
 
       - name: Create Android project and apply custom native code

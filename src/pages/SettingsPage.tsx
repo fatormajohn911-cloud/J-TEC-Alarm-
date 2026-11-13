@@ -10,8 +10,12 @@ import {
   saveUserTextApiKey,
   clearUserTextApiKey,
   testTextApiKey,
-  checkServerTextAvailable,
 } from '../services/geminiText';
+import {
+  BackendStateSnapshot,
+  getBackendStateSnapshot,
+  subscribeBackendState,
+} from '../services/apiClient';
 import {
   playTestTone,
   stopVoicePlayback,
@@ -62,6 +66,7 @@ interface PWAStateProps {
 interface SettingsPageProps {
   settings: AppSettings;
   pwa?: PWAStateProps;
+  aiEnabled?: boolean;
   scrollTarget?: string | null;
   onClearScrollTarget?: () => void;
   onBack: () => void;
@@ -89,6 +94,7 @@ function formatBuildDate(iso: string): string {
 export const SettingsPage: React.FC<SettingsPageProps> = ({
   settings,
   pwa,
+  aiEnabled = true,
   scrollTarget,
   onClearScrollTarget,
   onBack,
@@ -114,7 +120,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   // Key status & Developer / API Keys form states (never reveal raw saved keys)
   const [textKeyStatus, setTextKeyStatus] = useState(() => getTextKeyStatus());
   const [voiceKeyStatus, setVoiceKeyStatus] = useState(() => getVoiceKeyStatus());
-  const [serverProxyReady, setServerProxyReady] = useState<boolean | null>(null);
+  const [backendState, setBackendState] = useState<BackendStateSnapshot>(() =>
+    getBackendStateSnapshot()
+  );
 
   const [textKeyInput, setTextKeyInput] = useState('');
   const [voiceKeyInput, setVoiceKeyInput] = useState('');
@@ -156,10 +164,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   useEffect(() => {
     refreshCacheStats();
     refreshKeyStatuses();
-    if (!isNative) {
-      checkServerTextAvailable().then(setServerProxyReady);
-    }
+    const unsubBackend = subscribeBackendState(setBackendState);
     return () => {
+      unsubBackend();
       stopVoicePlayback();
     };
   }, [isNative]);
@@ -402,12 +409,20 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <button
                 type="button"
                 onClick={handleTestVoiceTone}
-                className="flex min-h-[36px] items-center gap-1.5 rounded-full bg-[#F3F3F5] hover:bg-gray-200 px-3.5 py-1 text-xs font-bold text-[#3B3D78] transition-colors"
+                disabled={!aiEnabled}
+                className="flex min-h-[36px] items-center gap-1.5 rounded-full bg-[#F3F3F5] hover:bg-gray-200 disabled:opacity-45 px-3.5 py-1 text-xs font-bold text-[#3B3D78] transition-colors"
               >
                 <Play className="h-3 w-3 fill-current text-[#9C1C7C]" />
                 <span>{testingVoice ? 'Stop' : 'Test Tone'}</span>
               </button>
             </div>
+
+            {!aiEnabled && (
+              <div className="mt-3 flex items-center gap-2 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-[11px] font-semibold text-amber-800">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                <span>AI voice and assistant features are temporarily paused.</span>
+              </div>
+            )}
 
             {voiceError && (
               <div className="mt-3 flex items-center gap-2 rounded-xl bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-700">
@@ -870,36 +885,70 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
 
             <div className="mt-3 divide-y divide-gray-100 text-xs">
               <div className="flex items-center justify-between py-2.5 gap-3">
-                <span className="font-bold text-[#1E1B4B]">Text API key</span>
+                <span className="font-bold text-[#1E1B4B]">API status</span>
                 <span
                   className={`font-semibold ${
-                    textKeyStatus.isSet || serverProxyReady
+                    backendState.status === 'reachable'
                       ? 'text-emerald-700'
-                      : 'text-amber-700'
+                      : backendState.status === 'waking'
+                      ? 'text-amber-700'
+                      : backendState.status === 'unreachable'
+                      ? 'text-red-600'
+                      : 'text-[#6B7280]'
                   }`}
                 >
-                  {textKeyStatus.isSet
-                    ? `Set (source: ${textKeyStatus.source})`
-                    : serverProxyReady
-                    ? 'Set (server)'
-                    : 'Missing'}
+                  {backendState.status === 'reachable'
+                    ? 'Reachable'
+                    : backendState.status === 'waking'
+                    ? 'Waking up…'
+                    : backendState.status === 'unreachable'
+                    ? 'Unreachable'
+                    : 'Not configured'}
                 </span>
               </div>
 
               <div className="flex items-center justify-between py-2.5 gap-3">
-                <span className="font-bold text-[#1E1B4B]">Voice API key</span>
+                <span className="font-bold text-[#1E1B4B]">Registered</span>
                 <span
                   className={`font-semibold ${
-                    voiceKeyStatus.isSet || serverProxyReady
-                      ? 'text-emerald-700'
-                      : 'text-amber-700'
+                    backendState.registered ? 'text-emerald-700' : 'text-[#6B7280]'
                   }`}
                 >
-                  {voiceKeyStatus.isSet
-                    ? `Set (source: ${voiceKeyStatus.source})`
-                    : serverProxyReady
-                    ? 'Set (server)'
-                    : 'Missing'}
+                  {backendState.registered ? 'Yes' : 'No'}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between py-2.5 gap-3">
+                <span className="font-bold text-[#1E1B4B]">Quota remaining</span>
+                <span className="font-mono font-semibold text-[#6B7280] text-right">
+                  {backendState.chatRemaining !== null ||
+                  backendState.speakRemaining !== null
+                    ? `${backendState.chatRemaining ?? '—'} chat · ${backendState.speakRemaining ?? '—'} voice`
+                    : backendState.config?.quotas
+                    ? `${backendState.config.quotas.chatPerDay ?? 40} chat · ${backendState.config.quotas.speakPerDay ?? 15} voice/day`
+                    : '—'}
+                </span>
+              </div>
+
+              <div className="flex items-start justify-between py-2.5 gap-3">
+                <span className="font-bold text-[#1E1B4B] shrink-0">Base URL host</span>
+                <span className="font-mono text-[11px] font-semibold text-[#6B7280] text-right break-all">
+                  {backendState.baseUrlHost}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between py-2.5 gap-3">
+                <span className="font-bold text-[#1E1B4B]">AI mode</span>
+                <span
+                  className={`font-semibold ${
+                    textKeyStatus.isSet ? 'text-emerald-700' : 'text-amber-700'
+                  }`}
+                >
+                  {textKeyStatus.source === 'backend'
+                    ? 'Secure Backend'
+                    : textKeyStatus.source === 'saved'
+                    ? 'Developer fallback'
+                    : 'Unconfigured'}
                 </span>
               </div>
 
@@ -1037,7 +1086,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             </div>
 
             <p className="mt-3 text-[11px] text-[#6B7280] leading-relaxed">
-              Optional testing keys stored locally on this device. Build-time environment keys are used automatically when present. Saved key values are never shown.
+              Developer fallback keys stored locally on this device. Used ONLY when VITE_API_BASE_URL is empty. Saved key values are never shown.
             </p>
 
             <div className="mt-4 space-y-5">

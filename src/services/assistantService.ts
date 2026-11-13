@@ -933,10 +933,19 @@ export async function runAssistantTurn(
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     onStatusChange?.('Thinking…');
 
-    const data = await requestAssistantTurn({
-      contents,
-      context: buildCompactContext(),
-    });
+    const data = await requestAssistantTurn(
+      {
+        contents,
+        context: buildCompactContext(),
+      },
+      {
+        onSlowWait: (isSlow) => {
+          if (isSlow) {
+            onStatusChange?.('Waking up the AI…');
+          }
+        },
+      }
+    );
 
     if (
       data.status === 'tool_calls' &&

@@ -27,6 +27,7 @@ interface HomePageProps {
   nextAlarmInfo: NextAlarmInfo;
   activeAlarms: Alarm[];
   settings: AppSettings;
+  aiEnabled?: boolean;
   onToggleAlarm: (id: string) => void;
   onOpenCreateAlarm: () => void;
   onOpenEditAlarm: (alarm: Alarm) => void;
@@ -42,6 +43,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   nextAlarmInfo,
   activeAlarms,
   settings,
+  aiEnabled = true,
   onToggleAlarm,
   onOpenCreateAlarm,
   onOpenEditAlarm,
@@ -287,24 +289,26 @@ export const HomePage: React.FC<HomePageProps> = ({
           </div>
 
           {/* 5. Slim AI Banner Card */}
-          <div
-            onClick={() => {
-              hapticsService.light();
-              onNavigate('assistant');
-            }}
-            className="mt-4 touch-pan-y flex cursor-pointer items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-[#9C1C7C]/10 via-[#3B3D78]/10 to-[#12A6A0]/10 border border-[#9C1C7C]/20 p-3.5 hover:border-[#9C1C7C]/40 transition-all active:scale-98 shadow-xs"
-          >
-            <div className="flex items-center gap-3 min-w-0 flex-1">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#3B3D78] text-white">
-                <Mic className="h-4 w-4" />
+          {aiEnabled && (
+            <div
+              onClick={() => {
+                hapticsService.light();
+                onNavigate('assistant');
+              }}
+              className="mt-4 touch-pan-y flex cursor-pointer items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-[#9C1C7C]/10 via-[#3B3D78]/10 to-[#12A6A0]/10 border border-[#9C1C7C]/20 p-3.5 hover:border-[#9C1C7C]/40 transition-all active:scale-98 shadow-xs"
+            >
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#3B3D78] text-white">
+                  <Mic className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-xs font-bold text-[#1E1B4B] truncate">Ask AI to set an alarm</h4>
+                  <p className="text-[11px] text-[#6B7280] truncate">"Wake me at 6:45 AM if it rains tomorrow"</p>
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <h4 className="text-xs font-bold text-[#1E1B4B] truncate">Ask AI to set an alarm</h4>
-                <p className="text-[11px] text-[#6B7280] truncate">"Wake me at 6:45 AM if it rains tomorrow"</p>
-              </div>
+              <ChevronRight className="h-5 w-5 shrink-0 text-[#9C1C7C]" />
             </div>
-            <ChevronRight className="h-5 w-5 shrink-0 text-[#9C1C7C]" />
-          </div>
+          )}
 
           {/* 6. "My Alarms" Section: Tap to edit, Swipe to delete, Clean list */}
           <div className="mt-6 rounded-t-[32px] bg-white pt-2">

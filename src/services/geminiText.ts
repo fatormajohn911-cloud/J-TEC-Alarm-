@@ -9,6 +9,10 @@ import {
   AiRequestError,
   parseAiErrorDetails,
 } from '../utils/aiErrorDetails';
+import {
+  hasBackendConfigured,
+  postChat,
+} from './apiClient';
 
 export interface AssistantTurnRequest {
   contents: unknown[];
@@ -38,14 +42,11 @@ export interface MorningBriefingParams {
   voiceStyle: 'warm' | 'coach' | 'executive';
 }
 
-export type KeySource = 'saved' | 'build' | 'none';
+export type KeySource = 'backend' | 'saved' | 'none';
 
 const TEXT_KEY_STORAGE = 'ai_wake_text_api_key_v1';
-const BUILD_TEXT_KEY = (
-  import.meta.env.VITE_GEMINI_TEXT_KEY as string | undefined
-)?.trim();
-const TEXT_MODEL = 'gemini-4-hydrogen';
-const TEXT_FALLBACK_MODEL = 'gemini-3.1-flash-lite';
+const TEXT_MODEL = 'gemini-2.5-flash';
+const TEXT_FALLBACK_MODEL = 'gemini-2.5-flash-lite';
 
 export class MissingTextKeyError extends Error {
   code = 'MISSING_KEY';
@@ -59,7 +60,7 @@ export function isTextKeyMissingError(err: unknown): boolean {
   if (!err) return false;
   if (err instanceof MissingTextKeyError) return true;
   const code = (err as { code?: unknown }).code;
-  if (code === 'MISSING_KEY') return true;
+  if (code === 'MISSING_KEY' || code === 'unconfigured') return true;
   const msg = err instanceof Error ? err.message : String(err);
   return msg.includes('MISSING_KEY') || msg.toLowerCase().includes('not configured');
 }
@@ -73,16 +74,15 @@ function getSavedUserTextKey(): string | undefined {
   }
 }
 
-function resolveTextKey(): { key?: string; source: KeySource } {
-  const saved = getSavedUserTextKey();
-  if (saved) return { key: saved, source: 'saved' };
-  if (BUILD_TEXT_KEY) return { key: BUILD_TEXT_KEY, source: 'build' };
-  return { key: undefined, source: 'none' };
-}
-
 export function getTextKeyStatus(): { isSet: boolean; source: KeySource } {
-  const resolved = resolveTextKey();
-  return { isSet: Boolean(resolved.key), source: resolved.source };
+  if (hasBackendConfigured()) {
+    return { isSet: true, source: 'backend' };
+  }
+  const saved = getSavedUserTextKey();
+  if (saved) {
+    return { isSet: true, source: 'saved' };
+  }
+  return { isSet: false, source: 'none' };
 }
 
 export function saveUserTextApiKey(key: string): void {
@@ -103,22 +103,6 @@ export function clearUserTextApiKey(): void {
     localStorage.removeItem(TEXT_KEY_STORAGE);
   } catch {
     // ignore
-  }
-}
-
-export async function checkServerTextAvailable(): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 2500);
-    const res = await fetch('./api/health', { signal: controller.signal });
-    window.clearTimeout(timer);
-    if (!res.ok) return false;
-    const ct = res.headers.get('content-type') || '';
-    if (!ct.includes('application/json')) return false;
-    const data = (await res.json()) as { textKeyConfigured?: boolean };
-    return Boolean(data.textKeyConfigured);
-  } catch {
-    return false;
   }
 }
 
@@ -254,10 +238,6 @@ Today routines (id|time|title|dur):
 ${routines || 'none'}`;
 }
 
-function formatClientGeminiError(err: unknown): string {
-  return parseAiErrorDetails(err).plainReason;
-}
-
 async function generateStaticTextWithFallback(
   ai: GoogleGenAI,
   params: {
@@ -325,46 +305,18 @@ export async function testTextApiKey(
   }
 
   const trimmedOverride = overrideKey?.trim();
-  const resolved = resolveTextKey();
-  const keyToUse = trimmedOverride || resolved.key;
-
-  if (!keyToUse) {
-    // Check if running with a configured server proxy
-    const serverReady = await checkServerTextAvailable();
-    if (!serverReady) {
-      return {
-        ok: false,
-        message: 'No Text API key is set.',
-        httpStatus: null,
-        apiMessage: 'MISSING_KEY',
-        plainReason: 'Missing API key. Add your Gemini Text API key in Settings > Developer / API Keys.',
-      };
-    }
+  if (trimmedOverride) {
     try {
-      const res = await fetch('./api/assistant/turn', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: 'Reply with OK.' }] }],
-          context: { currentDateTime: new Date().toISOString() },
-        }),
+      const ai = new GoogleGenAI({ apiKey: trimmedOverride });
+      await ai.models.generateContent({
+        model: TEXT_MODEL,
+        contents: 'Reply with OK.',
+        config: {
+          maxOutputTokens: 16,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        },
       });
-      if (res.ok) {
-        return { ok: true, message: 'OK — Server Text API reachable.' };
-      }
-      const errData = (await res.json().catch(() => ({}))) as { code?: string; error?: string };
-      const parsed = parseAiErrorDetails({
-        status: res.status,
-        code: errData.code,
-        message: errData.error || `HTTP ${res.status}`,
-      });
-      return {
-        ok: false,
-        message: parsed.plainReason,
-        httpStatus: parsed.httpStatus,
-        apiMessage: parsed.apiMessage,
-        plainReason: parsed.plainReason,
-      };
+      return { ok: true, message: 'OK — Developer Text API key is valid.' };
     } catch (err) {
       const parsed = parseAiErrorDetails(err);
       return {
@@ -377,8 +329,40 @@ export async function testTextApiKey(
     }
   }
 
+  if (hasBackendConfigured()) {
+    try {
+      await postChat({
+        messages: [{ role: 'user', parts: [{ text: 'Reply with OK.' }] }],
+        context: { currentDateTime: new Date().toISOString() },
+        tools: [],
+      });
+      return { ok: true, message: 'OK — Backend AI service is reachable.' };
+    } catch (err) {
+      const parsed = parseAiErrorDetails(err);
+      return {
+        ok: false,
+        message: parsed.plainReason,
+        httpStatus: parsed.httpStatus,
+        apiMessage: parsed.apiMessage,
+        plainReason: parsed.plainReason,
+      };
+    }
+  }
+
+  const savedKey = getSavedUserTextKey();
+  if (!savedKey) {
+    return {
+      ok: false,
+      message: 'AI backend URL is not configured and no developer key is saved.',
+      httpStatus: null,
+      apiMessage: 'MISSING_KEY',
+      plainReason:
+        'AI backend is not configured. Configure VITE_API_BASE_URL or add a developer key in Settings > Developer / API Keys.',
+    };
+  }
+
   try {
-    const ai = new GoogleGenAI({ apiKey: keyToUse });
+    const ai = new GoogleGenAI({ apiKey: savedKey });
     await ai.models.generateContent({
       model: TEXT_MODEL,
       contents: 'Reply with OK.',
@@ -387,36 +371,8 @@ export async function testTextApiKey(
         thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       },
     });
-    return { ok: true, message: 'OK — Text API key is valid and working.' };
+    return { ok: true, message: 'OK — Saved developer Text API key is working.' };
   } catch (err) {
-    const msg = (err instanceof Error ? err.message : String(err || '')).toUpperCase();
-    // If primary model quota hit, verify key against fallback model before failing
-    if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
-      try {
-        const ai = new GoogleGenAI({ apiKey: keyToUse });
-        await ai.models.generateContent({
-          model: TEXT_FALLBACK_MODEL,
-          contents: 'Reply with OK.',
-          config: {
-            maxOutputTokens: 16,
-            thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
-          },
-        });
-        return {
-          ok: true,
-          message: 'OK — Key is valid (primary quota full; flash-lite reachable).',
-        };
-      } catch (fallbackErr) {
-        const parsed = parseAiErrorDetails(fallbackErr);
-        return {
-          ok: false,
-          message: parsed.plainReason,
-          httpStatus: parsed.httpStatus,
-          apiMessage: parsed.apiMessage,
-          plainReason: parsed.plainReason,
-        };
-      }
-    }
     const parsed = parseAiErrorDetails(err);
     return {
       ok: false,
@@ -429,68 +385,61 @@ export async function testTextApiKey(
 }
 
 export async function requestAssistantTurn(
-  payload: AssistantTurnRequest
+  payload: AssistantTurnRequest,
+  options?: { onSlowWait?: (isSlow: boolean) => void }
 ): Promise<AssistantTurnResponse> {
-  const resolved = resolveTextKey();
-  let serverFallbackAllowed = resolved.source === 'saved';
-
-  if (resolved.source !== 'saved') {
+  if (hasBackendConfigured()) {
     try {
-      const response = await fetch('./api/assistant/turn', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const data = await postChat(
+        {
+          messages: payload.contents,
+          context: payload.context,
+          tools: ASSISTANT_TOOLS,
+        },
+        options
+      );
 
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        if (response.ok) {
-          return (await response.json()) as AssistantTurnResponse;
-        }
-        const errData = (await response.json().catch(() => ({}))) as {
-          code?: string;
-          error?: string;
+      const parts = Array.isArray(data.parts) ? data.parts : [];
+      const functionCalls = parts
+        .filter((p) => Boolean(p.functionCall?.name))
+        .map((p) => ({
+          id: p.functionCall?.id,
+          name: p.functionCall?.name,
+          args: (p.functionCall?.args || {}) as Record<string, unknown>,
+        }));
+
+      const text = parts
+        .map((p) => (typeof p.text === 'string' ? p.text : ''))
+        .join('')
+        .trim();
+
+      if (functionCalls.length > 0 && data.modelContent) {
+        return {
+          status: 'tool_calls',
+          modelContent: data.modelContent,
+          functionCalls,
         };
-        if (
-          errData.code === 'MISSING_KEY' ||
-          response.status === 404 ||
-          response.status === 503
-        ) {
-          serverFallbackAllowed = true;
-        } else {
-          throw new AiRequestError(
-            {
-              status: response.status,
-              code: errData.code,
-              message: errData.error || `HTTP ${response.status}`,
-            },
-            errData.code
-          );
-        }
-      } else {
-        // Static hosts return HTML 404 for unknown routes
-        serverFallbackAllowed = true;
       }
+
+      return {
+        status: 'final',
+        text,
+        modelContent: data.modelContent,
+      };
     } catch (err) {
-      if (!serverFallbackAllowed) {
-        if (resolved.key) {
-          serverFallbackAllowed = true;
-        } else if (err instanceof AiRequestError) {
-          throw err;
-        } else {
-          throw new AiRequestError(err);
-        }
-      }
+      throw new AiRequestError(err, (err as { code?: string })?.code);
     }
   }
 
-  if (!resolved.key) {
+  // Developer fallback ONLY when VITE_API_BASE_URL is empty AND user saved a key
+  const savedKey = getSavedUserTextKey();
+  if (!savedKey) {
     throw new MissingTextKeyError(
-      'AI Text API key is missing. Add a key in Settings > Developer / API Keys.'
+      'Backend API URL is not set. Add a developer key in Settings > Developer / API Keys for local testing.'
     );
   }
 
-  const ai = new GoogleGenAI({ apiKey: resolved.key });
+  const ai = new GoogleGenAI({ apiKey: savedKey });
   const response = await generateStaticTextWithFallback(ai, {
     contents: payload.contents as Content[],
     systemInstruction: buildClientSystemInstruction(payload.context || {}),
@@ -523,64 +472,6 @@ export async function requestAssistantTurn(
 export async function generateMorningBriefing(
   params: MorningBriefingParams
 ): Promise<string> {
-  const resolved = resolveTextKey();
-  let serverFallbackAllowed = resolved.source === 'saved';
-
-  if (resolved.source !== 'saved') {
-    try {
-      const response = await fetch('./api/briefing/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
-      });
-
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        if (response.ok) {
-          const data = (await response.json()) as { briefingText?: string };
-          return (data.briefingText || '').trim();
-        }
-        const errData = (await response.json().catch(() => ({}))) as {
-          code?: string;
-          error?: string;
-        };
-        if (
-          errData.code === 'MISSING_KEY' ||
-          response.status === 404 ||
-          response.status === 503
-        ) {
-          serverFallbackAllowed = true;
-        } else {
-          throw new AiRequestError(
-            {
-              status: response.status,
-              code: errData.code,
-              message: errData.error || `Briefing error (${response.status})`,
-            },
-            errData.code
-          );
-        }
-      } else {
-        serverFallbackAllowed = true;
-      }
-    } catch (err) {
-      if (!serverFallbackAllowed) {
-        if (resolved.key) {
-          serverFallbackAllowed = true;
-        } else if (err instanceof AiRequestError) {
-          throw err;
-        } else {
-          throw new AiRequestError(err);
-        }
-      }
-    }
-  }
-
-  if (!resolved.key) {
-    throw new MissingTextKeyError('Text API key is not configured.');
-  }
-
-  const ai = new GoogleGenAI({ apiKey: resolved.key });
   const styleTone =
     params.voiceStyle === 'coach'
       ? 'energetic and motivating'
@@ -596,7 +487,7 @@ export async function generateMorningBriefing(
           .join('; ')
       : 'No routines scheduled yet today.';
 
-  const prompt = `Write a short spoken wake-up briefing (2 to 4 natural sentences, max 65 words) for ${params.userName || 'Friend'}.
+  const prompt = `Write a short spoken morning wake-up briefing (2 to 4 natural sentences, max 65 words) for ${params.userName || 'Friend'}.
 Tone: ${styleTone}.
 Time: ${params.currentDateTime}.
 Alarm: ${params.alarmLabel || 'Morning Wake'}.
@@ -605,6 +496,36 @@ ${params.includeCalendar ? `Today routines: ${routinesList}` : ''}
 ${params.includeMotivation ? 'End with one brief uplifting line.' : ''}
 Reply in plain conversational text with no Markdown, asterisks, bullets, or quotes.`;
 
+  if (hasBackendConfigured()) {
+    try {
+      const data = await postChat({
+        messages: [{ role: 'user', parts: [{ text: prompt }] }],
+        context: {
+          userName: params.userName,
+          currentDateTime: params.currentDateTime,
+          todayRoutines: params.routines.slice(0, 4).map((r, idx) => ({
+            line: `r${idx}|${r.time}|${r.title}|${r.durationMinutes}m`,
+          })),
+        },
+        tools: [],
+      });
+      const text = (data.parts || [])
+        .map((p) => (typeof p.text === 'string' ? p.text : ''))
+        .join('')
+        .trim();
+      return text;
+    } catch (err) {
+      throw new AiRequestError(err, (err as { code?: string })?.code);
+    }
+  }
+
+  // Developer fallback ONLY when VITE_API_BASE_URL is empty AND user saved a key
+  const savedKey = getSavedUserTextKey();
+  if (!savedKey) {
+    throw new MissingTextKeyError('Backend URL is missing and no developer Text API key is saved.');
+  }
+
+  const ai = new GoogleGenAI({ apiKey: savedKey });
   const response = await generateStaticTextWithFallback(ai, {
     contents: prompt,
     systemInstruction:

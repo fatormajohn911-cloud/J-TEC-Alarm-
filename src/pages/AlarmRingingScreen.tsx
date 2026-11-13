@@ -18,6 +18,7 @@ interface AlarmRingingScreenProps {
   alarm: Alarm;
   settings?: AppSettings;
   routines?: ScheduleRoutine[];
+  aiEnabled?: boolean;
   onDismiss: () => void;
   onSnooze: (minutes: number) => void;
 }
@@ -26,6 +27,7 @@ export const AlarmRingingScreen: React.FC<AlarmRingingScreenProps> = ({
   alarm,
   settings,
   routines = [],
+  aiEnabled = true,
   onDismiss,
   onSnooze,
 }) => {
@@ -88,7 +90,7 @@ export const AlarmRingingScreen: React.FC<AlarmRingingScreenProps> = ({
         text = '';
       }
 
-      if (!text && navigator.onLine) {
+      if (!text && aiEnabled && navigator.onLine) {
         try {
           text = await generateMorningBriefing({
             userName: settings?.userName || 'Friend',
@@ -122,6 +124,8 @@ export const AlarmRingingScreen: React.FC<AlarmRingingScreenProps> = ({
       const cleanText = stripMarkdownForSpeech(text);
       setBriefingText(cleanText);
 
+      if (!aiEnabled) return;
+
       try {
         alarmAudio.setLoopVolume(duckedVolume);
         setIsSpeakingVoice(true);
@@ -148,10 +152,11 @@ export const AlarmRingingScreen: React.FC<AlarmRingingScreenProps> = ({
       alarmAudio.setLoopVolume(fullVolume);
       stopVoicePlayback();
     };
-  }, [alarm, settings, routines]);
+  }, [alarm, settings, routines, aiEnabled]);
 
   const handleToggleSpeak = async () => {
     hapticsService.light();
+    if (!aiEnabled) return;
     if (isSpeakingVoice) {
       stopVoicePlayback();
       setIsSpeakingVoice(false);
