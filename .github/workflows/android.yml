@@ -41,17 +41,35 @@ jobs:
           VITE_GEMINI_VOICE_KEY: ${{ secrets.VITE_GEMINI_VOICE_KEY }}
         run: npm run build
 
-      - name: Add Capacitor Android platform if missing
+      - name: Create Android project and apply custom native code
         run: |
-          if [ ! -d "android" ]; then
+          OVERLAY=""
+          if [ -d "native-overlay/android" ]; then
+            OVERLAY="native-overlay/android"
+          elif [ -d "android" ] && [ ! -f "android/build.gradle" ]; then
+            mv android /tmp/native-overlay-android
+            OVERLAY="/tmp/native-overlay-android"
+          fi
+
+          if [ ! -f "android/build.gradle" ]; then
+            rm -rf android
             npx cap add android
           fi
 
-      - name: Apply native-overlay/android over android/
-        run: |
-          cp -r native-overlay/android/* android/
+          if [ -z "$OVERLAY" ]; then
+            echo "ERROR: Custom native code not found (native-overlay/android or android/app/src/main)." >&2
+            exit 1
+          fi
+
+          cp -r "$OVERLAY"/. android/
           rm -f android/app/src/main/java/com/aiwake/app/MainActivity.java
           sed -i -E 's/[[:space:]]*package="[^"]*"//g' android/app/src/main/AndroidManifest.xml
+
+          if [ ! -f "android/app/src/main/java/com/aiwake/app/plugin/AlarmPlugin.kt" ]; then
+            echo "ERROR: AlarmPlugin.kt is missing after applying the overlay." >&2
+            exit 1
+          fi
+          echo "Android project ready with custom native code."
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
