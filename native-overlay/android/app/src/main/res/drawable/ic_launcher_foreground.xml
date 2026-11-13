@@ -1,0 +1,49 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="54"
+        android:translateY="54"
+        android:scaleX="0.145"
+        android:scaleY="0.145">
+        <group
+            android:translateX="-256"
+            android:translateY="-258">
+            <path
+                android:pathData="M126,154C126,124 150,100 180,100C194,100 207,105 216,114"
+                android:strokeWidth="28"
+                android:strokeColor="#FFFFFF"
+                android:strokeLineCap="round" />
+            <path
+                android:pathData="M386,154C386,124 362,100 332,100C318,100 305,105 296,114"
+                android:strokeWidth="28"
+                android:strokeColor="#FFFFFF"
+                android:strokeLineCap="round" />
+            <path
+                android:pathData="M168,378L142,406"
+                android:strokeWidth="28"
+                android:strokeColor="#FFFFFF"
+                android:strokeLineCap="round" />
+            <path
+                android:pathData="M344,378L370,406"
+                android:strokeWidth="28"
+                android:strokeColor="#FFFFFF"
+                android:strokeLineCap="round" />
+            <path
+                android:pathData="M256,146A126,126 0 1,1 255.9,146Z"
+                android:strokeWidth="28"
+                android:strokeColor="#FFFFFF" />
+            <path
+                android:fillColor="#9C1C7C"
+                android:pathData="M212,236A12,12 0 0,1 224,248V296A12,12 0 0,1 212,308A12,12 0 0,1 200,296V248A12,12 0 0,1 212,236Z" />
+            <path
+                android:fillColor="#9C1C7C"
+                android:pathData="M256,206A12,12 0 0,1 268,218V326A12,12 0 0,1 256,338A12,12 0 0,1 244,326V218A12,12 0 0,1 256,206Z" />
+            <path
+                android:fillColor="#9C1C7C"
+                android:pathData="M300,224A12,12 0 0,1 312,236V308A12,12 0 0,1 300,320A12,12 0 0,1 288,308V236A12,12 0 0,1 300,224Z" />
+        </group>
+    </group>
+</vector>
