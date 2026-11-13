@@ -1,4 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
+import {
+  AiRequestError,
+  parseAiErrorDetails,
+} from '../utils/aiErrorDetails';
 
 export type VoicePersona = 'warm' | 'coach' | 'executive';
 export type VoiceKeySource = 'saved' | 'build' | 'none';
@@ -51,31 +55,8 @@ export function clearUserVoiceApiKey(): void {
   }
 }
 
-function formatVoiceError(err: unknown, fallbackMessage: string): string {
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    return 'No internet connection. Please connect to the internet and try again.';
-  }
-  const raw = err instanceof Error ? err.message : String(err || '');
-  const upper = raw.toUpperCase();
-  if (upper.includes('429') || upper.includes('RESOURCE_EXHAUSTED') || upper.includes('QUOTA')) {
-    return 'Quota exceeded for this Voice API key. Upgrade billing or try again later.';
-  }
-  if (
-    upper.includes('API_KEY_INVALID') ||
-    upper.includes('API KEY NOT VALID') ||
-    upper.includes('PERMISSION_DENIED') ||
-    upper.includes('401') ||
-    upper.includes('403')
-  ) {
-    return 'Invalid Voice API key or insufficient permissions. Please check your key.';
-  }
-  if (upper.includes('FAILED TO FETCH') || upper.includes('NETWORKERROR')) {
-    return 'Network error while contacting Gemini Voice API. Check your internet connection.';
-  }
-  if (raw && !raw.trim().startsWith('{')) {
-    return raw.split('\n')[0].slice(0, 220);
-  }
-  return fallbackMessage;
+function formatVoiceError(err: unknown): string {
+  return parseAiErrorDetails(err).plainReason;
 }
 const VOICE_PERSONA_CONFIG: Record<VoicePersona, { voiceName: string; style: string }> = {
   warm: {
@@ -497,8 +478,13 @@ export async function getOrGenerateVoiceBlob(
           ) {
             serverFallbackAllowed = true;
           } else {
-            throw new Error(
-              formatVoiceError(errData.error || `Voice TTS error (${response.status})`, 'Voice TTS error.')
+            throw new AiRequestError(
+              {
+                status: response.status,
+                code: errData.code,
+                message: errData.error || `HTTP ${response.status}`,
+              },
+              errData.code
             );
           }
         }
@@ -509,10 +495,10 @@ export async function getOrGenerateVoiceBlob(
       if (!serverFallbackAllowed) {
         if (resolved.key) {
           serverFallbackAllowed = true;
+        } else if (err instanceof AiRequestError) {
+          throw err;
         } else {
-          throw err instanceof Error
-            ? err
-            : new Error('Voice API key is not configured.');
+          throw new AiRequestError(err);
         }
       }
     }
@@ -551,12 +537,18 @@ export async function getOrGenerateVoiceBlob(
       audioBase64 = inlinePart?.data;
       mimeType = inlinePart?.mimeType || 'audio/wav';
     } catch (err) {
-      throw new Error(formatVoiceError(err, 'Failed to synthesize voice audio.'));
+      throw new AiRequestError(err);
     }
   }
 
   if (!audioBase64) {
-    throw new Error('Voice API key is not configured. Add one in Settings > Developer / API Keys.');
+    throw new AiRequestError(
+      {
+        code: 'MISSING_KEY',
+        message: 'Voice API key is not configured. Add one in Settings > Developer / API Keys.',
+      },
+      'MISSING_KEY'
+    );
   }
 
   const { buffer, finalMimeType } = ensurePlayableAudioBuffer(audioBase64, mimeType);
@@ -658,7 +650,12 @@ export async function playTestTone(
 
 export async function testVoiceApiKey(
   overrideKey?: string
-): Promise<{ ok: boolean; message: string }> {
+): Promise<{
+  ok: boolean;
+  message: string;
+  httpStatus?: number | null;
+  apiMessage?: string;
+}> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     return { ok: false, message: 'No internet connection.' };
   }
@@ -681,12 +678,19 @@ export async function testVoiceApiKey(
             body: JSON.stringify({ text: 'Ready.', persona: 'warm' }),
           });
           if (ttsRes.ok) {
-            return { ok: true, message: 'Server Voice API connection succeeded.' };
+            return { ok: true, message: 'OK — Server Voice API connection succeeded.' };
           }
-          const errData = (await ttsRes.json().catch(() => ({}))) as { error?: string };
+          const errData = (await ttsRes.json().catch(() => ({}))) as { code?: string; error?: string };
+          const parsed = parseAiErrorDetails({
+            status: ttsRes.status,
+            code: errData.code,
+            message: errData.error || `HTTP ${ttsRes.status}`,
+          });
           return {
             ok: false,
-            message: formatVoiceError(errData.error || `Error ${ttsRes.status}`, 'Voice test failed.'),
+            message: parsed.plainReason,
+            httpStatus: parsed.httpStatus,
+            apiMessage: parsed.apiMessage,
           };
         }
       }
@@ -721,11 +725,14 @@ export async function testVoiceApiKey(
     if (!hasAudio) {
       return { ok: false, message: 'Voice API responded without audio.' };
     }
-    return { ok: true, message: 'Voice API key is valid and working.' };
+    return { ok: true, message: 'OK — Voice API key is valid and working.' };
   } catch (err) {
+    const parsed = parseAiErrorDetails(err);
     return {
       ok: false,
-      message: formatVoiceError(err, 'Voice API key test failed.'),
+      message: formatVoiceError(err),
+      httpStatus: parsed.httpStatus,
+      apiMessage: parsed.apiMessage,
     };
   }
 }

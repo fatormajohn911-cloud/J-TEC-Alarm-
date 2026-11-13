@@ -49,7 +49,24 @@ export function usePWA() {
 
     let cleanupSwListener: (() => void) | undefined;
 
-    if (!Capacitor.isNativePlatform() && 'serviceWorker' in navigator) {
+    if (Capacitor.isNativePlatform()) {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker
+          .getRegistrations()
+          .then((regs) => {
+            regs.forEach((r) => r.unregister().catch(() => {}));
+          })
+          .catch(() => {});
+      }
+      if ('caches' in window) {
+        caches
+          .keys()
+          .then((keys) => {
+            keys.forEach((k) => caches.delete(k).catch(() => {}));
+          })
+          .catch(() => {});
+      }
+    } else if ('serviceWorker' in navigator) {
       const updateSW = registerSW({
         immediate: true,
         onNeedRefresh() {

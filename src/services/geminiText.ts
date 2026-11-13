@@ -5,6 +5,10 @@ import {
   type Content,
   type FunctionDeclaration,
 } from '@google/genai';
+import {
+  AiRequestError,
+  parseAiErrorDetails,
+} from '../utils/aiErrorDetails';
 
 export interface AssistantTurnRequest {
   contents: unknown[];
@@ -250,35 +254,8 @@ Today routines (id|time|title|dur):
 ${routines || 'none'}`;
 }
 
-function formatClientGeminiError(err: unknown, fallbackMessage: string): string {
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    return 'No internet connection. Please connect to the internet and try again.';
-  }
-  const raw = err instanceof Error ? err.message : String(err || '');
-  const upper = raw.toUpperCase();
-  if (
-    upper.includes('429') ||
-    upper.includes('RESOURCE_EXHAUSTED') ||
-    upper.includes('QUOTA')
-  ) {
-    return 'Quota exceeded for this API key. Upgrade billing or switch keys, or try again later.';
-  }
-  if (
-    upper.includes('API_KEY_INVALID') ||
-    upper.includes('API KEY NOT VALID') ||
-    upper.includes('PERMISSION_DENIED') ||
-    upper.includes('401') ||
-    upper.includes('403')
-  ) {
-    return 'Invalid API key or insufficient permissions. Please double-check your key.';
-  }
-  if (upper.includes('FAILED TO FETCH') || upper.includes('NETWORKERROR')) {
-    return 'Network error while contacting Gemini API. Check your internet connection.';
-  }
-  if (raw && !raw.trim().startsWith('{')) {
-    return raw.split('\n')[0].slice(0, 220);
-  }
-  return fallbackMessage;
+function formatClientGeminiError(err: unknown): string {
+  return parseAiErrorDetails(err).plainReason;
 }
 
 async function generateStaticTextWithFallback(
@@ -322,17 +299,29 @@ async function generateStaticTextWithFallback(
       if (shouldFallback && i < models.length - 1) {
         continue;
       }
-      throw new Error(formatClientGeminiError(err, 'Failed to reach Gemini assistant.'));
+      throw new AiRequestError(err);
     }
   }
-  throw new Error(formatClientGeminiError(lastError, 'Failed to reach Gemini assistant.'));
+  throw new AiRequestError(lastError);
 }
 
 export async function testTextApiKey(
   overrideKey?: string
-): Promise<{ ok: boolean; message: string }> {
+): Promise<{
+  ok: boolean;
+  message: string;
+  httpStatus?: number | null;
+  apiMessage?: string;
+  plainReason?: string;
+}> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    return { ok: false, message: 'No internet connection.' };
+    return {
+      ok: false,
+      message: 'No internet connection.',
+      httpStatus: null,
+      apiMessage: 'Browser offline',
+      plainReason: 'No internet connection. Connect to Wi-Fi or mobile data and try again.',
+    };
   }
 
   const trimmedOverride = overrideKey?.trim();
@@ -343,7 +332,13 @@ export async function testTextApiKey(
     // Check if running with a configured server proxy
     const serverReady = await checkServerTextAvailable();
     if (!serverReady) {
-      return { ok: false, message: 'No Text API key is set.' };
+      return {
+        ok: false,
+        message: 'No Text API key is set.',
+        httpStatus: null,
+        apiMessage: 'MISSING_KEY',
+        plainReason: 'Missing API key. Add your Gemini Text API key in Settings > Developer / API Keys.',
+      };
     }
     try {
       const res = await fetch('./api/assistant/turn', {
@@ -355,15 +350,30 @@ export async function testTextApiKey(
         }),
       });
       if (res.ok) {
-        return { ok: true, message: 'Server Text API connection succeeded.' };
+        return { ok: true, message: 'OK — Server Text API reachable.' };
       }
-      const errData = (await res.json().catch(() => ({}))) as { error?: string };
+      const errData = (await res.json().catch(() => ({}))) as { code?: string; error?: string };
+      const parsed = parseAiErrorDetails({
+        status: res.status,
+        code: errData.code,
+        message: errData.error || `HTTP ${res.status}`,
+      });
       return {
         ok: false,
-        message: formatClientGeminiError(errData.error || `Error ${res.status}`, 'Test failed.'),
+        message: parsed.plainReason,
+        httpStatus: parsed.httpStatus,
+        apiMessage: parsed.apiMessage,
+        plainReason: parsed.plainReason,
       };
     } catch (err) {
-      return { ok: false, message: formatClientGeminiError(err, 'Network request failed.') };
+      const parsed = parseAiErrorDetails(err);
+      return {
+        ok: false,
+        message: parsed.plainReason,
+        httpStatus: parsed.httpStatus,
+        apiMessage: parsed.apiMessage,
+        plainReason: parsed.plainReason,
+      };
     }
   }
 
@@ -377,7 +387,7 @@ export async function testTextApiKey(
         thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       },
     });
-    return { ok: true, message: 'Text API key is valid and working.' };
+    return { ok: true, message: 'OK — Text API key is valid and working.' };
   } catch (err) {
     const msg = (err instanceof Error ? err.message : String(err || '')).toUpperCase();
     // If primary model quota hit, verify key against fallback model before failing
@@ -394,18 +404,26 @@ export async function testTextApiKey(
         });
         return {
           ok: true,
-          message: 'Key is valid (primary quota full; using flash-lite fallback).',
+          message: 'OK — Key is valid (primary quota full; flash-lite reachable).',
         };
       } catch (fallbackErr) {
+        const parsed = parseAiErrorDetails(fallbackErr);
         return {
           ok: false,
-          message: formatClientGeminiError(fallbackErr, 'Quota exceeded for Text API key.'),
+          message: parsed.plainReason,
+          httpStatus: parsed.httpStatus,
+          apiMessage: parsed.apiMessage,
+          plainReason: parsed.plainReason,
         };
       }
     }
+    const parsed = parseAiErrorDetails(err);
     return {
       ok: false,
-      message: formatClientGeminiError(err, 'Text API key test failed.'),
+      message: parsed.plainReason,
+      httpStatus: parsed.httpStatus,
+      apiMessage: parsed.apiMessage,
+      plainReason: parsed.plainReason,
     };
   }
 }
@@ -440,11 +458,13 @@ export async function requestAssistantTurn(
         ) {
           serverFallbackAllowed = true;
         } else {
-          throw new Error(
-            formatClientGeminiError(
-              errData.error || `Assistant error (${response.status})`,
-              `Assistant error (${response.status})`
-            )
+          throw new AiRequestError(
+            {
+              status: response.status,
+              code: errData.code,
+              message: errData.error || `HTTP ${response.status}`,
+            },
+            errData.code
           );
         }
       } else {
@@ -455,10 +475,10 @@ export async function requestAssistantTurn(
       if (!serverFallbackAllowed) {
         if (resolved.key) {
           serverFallbackAllowed = true;
+        } else if (err instanceof AiRequestError) {
+          throw err;
         } else {
-          throw err instanceof Error
-            ? err
-            : new Error('AI Text service is unavailable right now.');
+          throw new AiRequestError(err);
         }
       }
     }
@@ -531,11 +551,13 @@ export async function generateMorningBriefing(
         ) {
           serverFallbackAllowed = true;
         } else {
-          throw new Error(
-            formatClientGeminiError(
-              errData.error || `Briefing error (${response.status})`,
-              `Briefing error (${response.status})`
-            )
+          throw new AiRequestError(
+            {
+              status: response.status,
+              code: errData.code,
+              message: errData.error || `Briefing error (${response.status})`,
+            },
+            errData.code
           );
         }
       } else {
@@ -545,8 +567,10 @@ export async function generateMorningBriefing(
       if (!serverFallbackAllowed) {
         if (resolved.key) {
           serverFallbackAllowed = true;
+        } else if (err instanceof AiRequestError) {
+          throw err;
         } else {
-          throw err instanceof Error ? err : new Error('Briefing service unavailable.');
+          throw new AiRequestError(err);
         }
       }
     }

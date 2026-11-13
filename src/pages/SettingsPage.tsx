@@ -41,9 +41,16 @@ import {
   KeyRound,
   Activity,
   Loader2,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { AiIcon } from '../components/common/AiIcon';
 import { AppLogo } from '../components/common/AppLogo';
+import {
+  buildCopyableAiErrorReport,
+  copyTextToClipboard,
+  ParsedAiError,
+} from '../utils/aiErrorDetails';
 
 interface PWAStateProps {
   canPromptInstall: boolean;
@@ -121,6 +128,18 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     ok?: boolean;
     message?: string;
   }>({ loading: false });
+  const [networkCheckState, setNetworkCheckState] = useState<{
+    loading: boolean;
+    ok?: boolean;
+    message?: string;
+    details?: ParsedAiError;
+  }>({ loading: false });
+  const [copiedDiagError, setCopiedDiagError] = useState(false);
+
+  const pageOrigin =
+    typeof window !== 'undefined' && window.location
+      ? window.location.origin
+      : 'unknown';
 
   const devSectionRef = useRef<HTMLElement | null>(null);
 
@@ -144,6 +163,33 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       stopVoicePlayback();
     };
   }, [isNative]);
+
+  const handleRunNetworkCheck = async () => {
+    hapticsService.light();
+    setNetworkCheckState({ loading: true });
+    setCopiedDiagError(false);
+    const res = await testTextApiKey();
+    if (res.ok) {
+      setNetworkCheckState({
+        loading: false,
+        ok: true,
+        message: res.message || 'OK',
+      });
+    } else {
+      const details: ParsedAiError = {
+        category: 'unknown',
+        plainReason: res.plainReason || res.message,
+        httpStatus: res.httpStatus ?? null,
+        apiMessage: res.apiMessage || res.message,
+      };
+      setNetworkCheckState({
+        loading: false,
+        ok: false,
+        message: res.plainReason || res.message,
+        details,
+      });
+    }
+  };
 
   useEffect(() => {
     if (scrollTarget === 'developer-api-keys' && devSectionRef.current) {
@@ -862,6 +908,100 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 <span className="font-mono font-semibold text-[#6B7280]">
                   {isNative ? 'Android' : 'Web'}
                 </span>
+              </div>
+
+              <div className="flex items-start justify-between py-2.5 gap-3">
+                <span className="font-bold text-[#1E1B4B] shrink-0">Page origin</span>
+                <span className="font-mono text-[11px] font-semibold text-[#6B7280] text-right break-all">
+                  {pageOrigin}
+                </span>
+              </div>
+
+              <div className="py-2.5 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <span className="font-bold text-[#1E1B4B]">Network check</span>
+                    <p className="text-[11px] text-[#6B7280]">
+                      Sends one tiny request to the text API
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRunNetworkCheck}
+                    disabled={networkCheckState.loading}
+                    className="shrink-0 min-h-[34px] rounded-xl bg-[#F3F3F5] hover:bg-gray-200 px-3 text-[11px] font-bold text-[#3B3D78] transition-colors flex items-center gap-1.5"
+                  >
+                    {networkCheckState.loading && (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    )}
+                    <span>{networkCheckState.loading ? 'Checking…' : 'Check'}</span>
+                  </button>
+                </div>
+
+                {networkCheckState.ok !== undefined && (
+                  <div
+                    className={`rounded-xl px-3 py-2 text-[11px] font-semibold space-y-1 ${
+                      networkCheckState.ok
+                        ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                        : 'bg-red-50 text-red-700 border border-red-200'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      {networkCheckState.ok ? (
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      )}
+                      <span className="break-words">
+                        {networkCheckState.ok ? 'OK' : networkCheckState.message}
+                      </span>
+                    </div>
+                    {networkCheckState.ok && networkCheckState.message && (
+                      <p className="pl-5 text-[10px] font-normal text-emerald-700 break-words">
+                        {networkCheckState.message}
+                      </p>
+                    )}
+                    {!networkCheckState.ok && networkCheckState.details && (
+                      <div className="pl-5 space-y-1.5">
+                        <p className="text-[10px] font-mono text-red-600/90 break-words">
+                          {networkCheckState.details.httpStatus
+                            ? `HTTP ${networkCheckState.details.httpStatus}: `
+                            : ''}
+                          {networkCheckState.details.apiMessage}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!networkCheckState.details) return;
+                            const ok = await copyTextToClipboard(
+                              buildCopyableAiErrorReport(
+                                'network_check',
+                                networkCheckState.details
+                              )
+                            );
+                            if (ok) {
+                              setCopiedDiagError(true);
+                              window.setTimeout(() => setCopiedDiagError(false), 2000);
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-[10px] font-bold text-red-700 border border-red-200 hover:bg-red-100/40"
+                        >
+                          {copiedDiagError ? (
+                            <>
+                              <Check className="h-3 w-3" />
+                              <span>Copied</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-3 w-3" />
+                              <span>Copy error details</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-between py-2.5 gap-3">

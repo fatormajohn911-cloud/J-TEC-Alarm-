@@ -37,6 +37,12 @@ import {
   isTextKeyMissingError,
 } from '../services/geminiText';
 import {
+  buildCopyableAiErrorReport,
+  copyTextToClipboard,
+  parseAiErrorDetails,
+  ParsedAiError,
+} from '../utils/aiErrorDetails';
+import {
   Mic,
   MicOff,
   ArrowUp,
@@ -52,6 +58,8 @@ import {
   Loader2,
   RotateCcw,
   KeyRound,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 interface AssistantPageProps {
@@ -181,8 +189,14 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
   const [thinkingStatus, setThinkingStatus] = useState<string>('Thinking…');
   const [errorInfo, setErrorInfo] = useState<{
     message: string;
+    details: ParsedAiError;
     retryHistory: ChatMessage[];
   } | null>(null);
+  const [voiceErrorInfo, setVoiceErrorInfo] = useState<{
+    msgId: string;
+    details: ParsedAiError;
+  } | null>(null);
+  const [copiedErrorKey, setCopiedErrorKey] = useState<string | null>(null);
   const [isAiMissingSetup, setIsAiMissingSetup] = useState<boolean>(false);
   const [voiceNote, setVoiceNote] = useState<string | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -315,26 +329,15 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
       setMessages((prev) => [...prev, assistantMsg]);
       setAssistantState('idle');
     } catch (err) {
-      const rawMsg = err instanceof Error ? err.message : '';
-      console.warn('Assistant turn unavailable:', rawMsg || err);
+      const parsed = parseAiErrorDetails(err);
+      console.warn('Assistant turn unavailable:', parsed.apiMessage || err);
       setAssistantState('idle');
       if (isTextKeyMissingError(err)) {
         setIsAiMissingSetup(true);
-        setErrorInfo(null);
-        return;
       }
-      const displayMessage =
-        rawMsg &&
-        !rawMsg.trim().startsWith('{') &&
-        (rawMsg.includes('API key') ||
-          rawMsg.includes('quota') ||
-          rawMsg.includes('Settings > Secrets') ||
-          rawMsg.includes('unavailable') ||
-          rawMsg.includes('permission'))
-          ? rawMsg
-          : "Couldn't reach the assistant. Try again";
       setErrorInfo({
-        message: displayMessage,
+        message: "Couldn't reach the assistant.",
+        details: parsed,
         retryHistory: historyToSend,
       });
     } finally {
@@ -382,9 +385,25 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
     storageService.clearChatHistory();
   };
 
+  const handleCopyError = async (
+    key: string,
+    type: 'text' | 'voice',
+    details: ParsedAiError
+  ) => {
+    hapticsService.light();
+    const ok = await copyTextToClipboard(buildCopyableAiErrorReport(type, details));
+    if (ok) {
+      setCopiedErrorKey(key);
+      window.setTimeout(() => {
+        setCopiedErrorKey((curr) => (curr === key ? null : curr));
+      }, 2000);
+    }
+  };
+
   const handleToggleSpeaker = async (msg: ChatMessage) => {
     hapticsService.light();
     setSpeakerErrorId(null);
+    setVoiceErrorInfo(null);
 
     if (
       voicePlayback.activeKey === msg.id &&
@@ -401,8 +420,10 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
         speechRate: settings.speechRate,
         playbackId: msg.id,
       });
-    } catch {
+    } catch (err) {
+      const parsed = parseAiErrorDetails(err);
       setSpeakerErrorId(msg.id);
+      setVoiceErrorInfo({ msgId: msg.id, details: parsed });
     }
   };
 
@@ -917,7 +938,7 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
 
                           {/* Cached Speaker Button under every AI text message */}
                           {!isUser && msg.text.trim().length > 0 && (
-                            <div className="mt-1 flex items-center">
+                            <div className="mt-1 flex flex-col items-start gap-1.5 w-full">
                               <button
                                 type="button"
                                 onClick={() => handleToggleSpeaker(msg)}
@@ -960,6 +981,59 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
                                   </>
                                 )}
                               </button>
+
+                              {isThisError && voiceErrorInfo?.msgId === msg.id && (
+                                <div className="w-full rounded-2xl border border-red-100 bg-red-50/80 px-3 py-2.5 space-y-1.5">
+                                  <p className="text-[11px] font-bold text-red-700">
+                                    Couldn&apos;t play voice audio
+                                  </p>
+                                  <p className="text-[11px] font-medium text-red-700 leading-snug break-words">
+                                    {voiceErrorInfo.details.plainReason}
+                                  </p>
+                                  <p className="text-[10px] font-mono text-red-600/90 break-words leading-snug">
+                                    {voiceErrorInfo.details.httpStatus
+                                      ? `HTTP ${voiceErrorInfo.details.httpStatus}: `
+                                      : ''}
+                                    {voiceErrorInfo.details.apiMessage}
+                                  </p>
+                                  <div className="flex items-center gap-2 pt-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleCopyError(
+                                          msg.id,
+                                          'voice',
+                                          voiceErrorInfo.details
+                                        )
+                                      }
+                                      className="inline-flex items-center gap-1 rounded-xl bg-white px-2.5 py-1 text-[10px] font-bold text-red-700 border border-red-200 hover:bg-red-100/40"
+                                    >
+                                      {copiedErrorKey === msg.id ? (
+                                        <>
+                                          <Check className="h-3 w-3" />
+                                          <span>Copied</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Copy className="h-3 w-3" />
+                                          <span>Copy error details</span>
+                                        </>
+                                      )}
+                                    </button>
+                                    {voiceErrorInfo.details.category === 'missing_key' &&
+                                      onOpenApiKeySettings && (
+                                        <button
+                                          type="button"
+                                          onClick={onOpenApiKeySettings}
+                                          className="inline-flex items-center gap-1 rounded-xl bg-[#3B3D78] px-2.5 py-1 text-[10px] font-bold text-white"
+                                        >
+                                          <KeyRound className="h-3 w-3" />
+                                          <span>API Keys</span>
+                                        </button>
+                                      )}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1030,27 +1104,75 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
             </motion.div>
           )}
 
-          {/* Friendly Error State with Retry */}
-          {errorInfo && !isAiMissingSetup && (
+          {/* Detailed Error State with Plain Reason, API Details, Retry & Copy */}
+          {errorInfo && (
             <motion.div
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-red-100 bg-red-50/80 px-3.5 py-2.5"
+              className="mt-3 rounded-2xl border border-red-100 bg-red-50/80 px-3.5 py-3 space-y-2"
             >
-              <div className="flex items-center gap-2 min-w-0">
-                <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
-                <span className="text-xs font-semibold text-red-700 leading-snug break-words">
-                  {errorInfo.message}
-                </span>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+                  <span className="text-xs font-bold text-red-700 leading-snug break-words">
+                    {errorInfo.message}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRetry}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-white px-3 py-1.5 text-xs font-bold text-red-600 shadow-xs border border-red-100 hover:bg-red-100/40 active:scale-95 transition-all"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  <span>Retry</span>
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={handleRetry}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-white px-3 py-1.5 text-xs font-bold text-red-600 shadow-xs border border-red-100 hover:bg-red-100/40 active:scale-95 transition-all"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                <span>Retry</span>
-              </button>
+
+              <div className="pl-6 space-y-1">
+                <p className="text-xs font-medium text-red-700 leading-snug break-words">
+                  {errorInfo.details.plainReason}
+                </p>
+                <p className="text-[11px] font-mono text-red-600/90 leading-snug break-words">
+                  {errorInfo.details.httpStatus
+                    ? `HTTP ${errorInfo.details.httpStatus}: `
+                    : ''}
+                  {errorInfo.details.apiMessage}
+                </p>
+                <div className="pt-1 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyError('text', 'text', errorInfo.details)
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-white px-2.5 py-1.5 text-[11px] font-bold text-red-700 border border-red-200 hover:bg-red-100/40 transition-colors"
+                  >
+                    {copiedErrorKey === 'text' ? (
+                      <>
+                        <Check className="h-3.5 w-3.5" />
+                        <span>Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3.5 w-3.5" />
+                        <span>Copy error details</span>
+                      </>
+                    )}
+                  </button>
+                  {(errorInfo.details.category === 'missing_key' ||
+                    errorInfo.details.category === 'invalid_key' ||
+                    errorInfo.details.category === 'key_restricted') &&
+                    onOpenApiKeySettings && (
+                      <button
+                        type="button"
+                        onClick={onOpenApiKeySettings}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-[#3B3D78] px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-[#2E2F6B] transition-colors"
+                      >
+                        <KeyRound className="h-3.5 w-3.5" />
+                        <span>Developer / API Keys</span>
+                      </button>
+                    )}
+                </div>
+              </div>
             </motion.div>
           )}
 
