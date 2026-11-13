@@ -15,6 +15,7 @@ const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT || 3000);
 const TEXT_MODEL = 'gemini-4-hydrogen';
+const TEXT_FALLBACK_MODEL = 'gemini-3.1-flash-lite';
 const VOICE_MODEL = 'gemini-3.8-flash-lite-tts';
 
 const BASE_SYSTEM_INSTRUCTION =
@@ -309,9 +310,241 @@ function getVoiceAiClient(): GoogleGenAI | null {
   );
 }
 
+interface ParsedGeminiError {
+  status: number;
+  code: string;
+  message: string;
+  isQuotaOrRateLimit: boolean;
+  isTransient: boolean;
+  isDailyQuotaExhausted: boolean;
+}
+
+function parseGeminiApiError(err: unknown, fallbackMessage: string): ParsedGeminiError {
+  const rawMessage = err instanceof Error ? err.message : String(err || '');
+  let status =
+    typeof (err as { status?: unknown })?.status === 'number'
+      ? (err as { status: number }).status
+      : 500;
+  let apiStatus = '';
+  let detailMessage = rawMessage;
+
+  const jsonStart = rawMessage.indexOf('{');
+  if (jsonStart !== -1) {
+    try {
+      const parsed = JSON.parse(rawMessage.slice(jsonStart)) as {
+        error?: { code?: number; status?: string; message?: string };
+      };
+      if (parsed?.error) {
+        if (typeof parsed.error.code === 'number') status = parsed.error.code;
+        if (typeof parsed.error.status === 'string') apiStatus = parsed.error.status;
+        if (typeof parsed.error.message === 'string') detailMessage = parsed.error.message;
+      }
+    } catch {
+      // ignore non-JSON message
+    }
+  }
+
+  const upper = `${apiStatus} ${detailMessage}`.toUpperCase();
+  const isDailyQuotaExhausted =
+    upper.includes('PERDAY') ||
+    upper.includes('PER_DAY') ||
+    upper.includes('FREE_TIER_REQUESTS') ||
+    upper.includes('CHECK YOUR PLAN AND BILLING');
+
+  const isQuotaOrRateLimit =
+    status === 429 ||
+    upper.includes('RESOURCE_EXHAUSTED') ||
+    upper.includes('QUOTA');
+
+  const isInvalidKey =
+    status === 401 ||
+    status === 403 ||
+    upper.includes('API_KEY_INVALID') ||
+    upper.includes('PERMISSION_DENIED');
+
+  const isNotFound = status === 404 || upper.includes('NOT_FOUND');
+  const isTransient =
+    status === 503 ||
+    status === 500 ||
+    upper.includes('UNAVAILABLE') ||
+    upper.includes('OVERLOADED') ||
+    (isQuotaOrRateLimit && !isDailyQuotaExhausted);
+
+  if (isInvalidKey) {
+    return {
+      status: 403,
+      code: 'INVALID_KEY',
+      message:
+        'Gemini API key is invalid or lacks permission. Please check your key in Settings > Secrets.',
+      isQuotaOrRateLimit: false,
+      isTransient: false,
+      isDailyQuotaExhausted: false,
+    };
+  }
+
+  if (isQuotaOrRateLimit) {
+    return {
+      status: 429,
+      code: 'QUOTA_EXCEEDED',
+      message:
+        'Daily AI quota reached for the current free-tier API key. Select a billing-enabled API key in Settings > Secrets to increase your quota, or try again later.',
+      isQuotaOrRateLimit: true,
+      isTransient,
+      isDailyQuotaExhausted,
+    };
+  }
+
+  if (isNotFound) {
+    return {
+      status: 404,
+      code: 'MODEL_NOT_FOUND',
+      message: 'The requested AI model is currently unavailable.',
+      isQuotaOrRateLimit: false,
+      isTransient: false,
+      isDailyQuotaExhausted: false,
+    };
+  }
+
+  return {
+    status: status >= 400 && status < 600 ? status : 502,
+    code: 'GEMINI_ERROR',
+    message:
+      detailMessage && !detailMessage.trim().startsWith('{')
+        ? detailMessage.split('\n')[0].slice(0, 220)
+        : fallbackMessage,
+    isQuotaOrRateLimit: false,
+    isTransient,
+    isDailyQuotaExhausted: false,
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function generateTextWithFallback(
+  ai: GoogleGenAI,
+  params: {
+    contents: Content[] | string;
+    systemInstruction: string;
+    maxOutputTokens: number;
+    tools?: Array<{ functionDeclarations: FunctionDeclaration[] }>;
+  }
+) {
+  const models = [
+    { model: TEXT_MODEL, thinkingLevel: ThinkingLevel.LOW },
+    { model: TEXT_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL },
+  ];
+
+  let lastError: unknown;
+
+  for (let mIdx = 0; mIdx < models.length; mIdx++) {
+    const candidate = models[mIdx];
+    const maxAttempts = mIdx === 0 ? 2 : 2;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        return await ai.models.generateContent({
+          model: candidate.model,
+          contents: params.contents,
+          config: {
+            systemInstruction: params.systemInstruction,
+            maxOutputTokens: params.maxOutputTokens,
+            thinkingConfig: { thinkingLevel: candidate.thinkingLevel },
+            ...(params.tools ? { tools: params.tools } : {}),
+          },
+        });
+      } catch (err) {
+        lastError = err;
+        const parsed = parseGeminiApiError(err, 'Gemini request failed.');
+
+        // Never retry or fall back on invalid API key
+        if (parsed.code === 'INVALID_KEY') {
+          throw err;
+        }
+
+        // If daily quota is exhausted on primary model, immediately switch to fallback model
+        if (parsed.isDailyQuotaExhausted || parsed.code === 'MODEL_NOT_FOUND') {
+          break;
+        }
+
+        // Exponential backoff only for transient errors before trying next attempt/model
+        if (parsed.isTransient && attempt < maxAttempts - 1) {
+          await sleep(600 * Math.pow(2, attempt));
+          continue;
+        }
+
+        // For 429 or transient errors after retries, break to try fallback model
+        if (parsed.isQuotaOrRateLimit || parsed.isTransient) {
+          break;
+        }
+
+        throw err;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+async function generateVoiceWithRetry(
+  ai: GoogleGenAI,
+  text: string,
+  voiceCfg: { voiceName: string; style: string }
+) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await ai.models.generateContent({
+        model: VOICE_MODEL,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text,
+                speechMetadata: {
+                  style: voiceCfg.style,
+                },
+              },
+            ],
+          },
+        ],
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: voiceCfg.voiceName,
+              },
+            },
+          },
+        },
+      });
+    } catch (err) {
+      lastError = err;
+      const parsed = parseGeminiApiError(err, 'Voice synthesis failed.');
+      if (parsed.isTransient && attempt === 0) {
+        await sleep(700);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '2mb' }));
+
+  app.get('/api/health', (_req, res) => {
+    res.json({
+      ok: true,
+      textKeyConfigured: Boolean(getTextAiClient()),
+      voiceKeyConfigured: Boolean(getVoiceAiClient()),
+    });
+  });
 
   // 1. TEXT API: Assistant chat & tool calling
   app.post('/api/assistant/turn', async (req, res) => {
@@ -345,15 +578,11 @@ async function startServer() {
         }
       );
 
-      const response = await ai.models.generateContent({
-        model: TEXT_MODEL,
+      const response = await generateTextWithFallback(ai, {
         contents: body.contents,
-        config: {
-          systemInstruction,
-          maxOutputTokens: 400,
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          tools: [{ functionDeclarations: ASSISTANT_TOOLS }],
-        },
+        systemInstruction,
+        maxOutputTokens: 400,
+        tools: [{ functionDeclarations: ASSISTANT_TOOLS }],
       });
 
       const modelContent = response.candidates?.[0]?.content;
@@ -373,10 +602,17 @@ async function startServer() {
         modelContent,
       });
     } catch (err: unknown) {
-      console.error('[AI Wake /api/assistant/turn error]:', err);
-      const message =
-        err instanceof Error ? err.message : 'Failed to reach Gemini text assistant.';
-      return res.status(500).json({ error: message });
+      const parsed = parseGeminiApiError(
+        err,
+        'Failed to reach Gemini text assistant.'
+      );
+      console.warn(
+        `[AI Wake /api/assistant/turn] HTTP ${parsed.status} (${parsed.code}): ${parsed.message}`
+      );
+      return res.status(parsed.status).json({
+        code: parsed.code,
+        error: parsed.message,
+      });
     }
   });
 
@@ -427,25 +663,28 @@ ${body.includeCalendar !== false ? `Today routines: ${routinesList}` : ''}
 ${body.includeMotivation !== false ? 'End with one brief uplifting line.' : ''}
 Reply in plain conversational text with no Markdown, asterisks, bullets, or quotes.`;
 
-      const response = await ai.models.generateContent({
-        model: TEXT_MODEL,
+      const response = await generateTextWithFallback(ai, {
         contents: prompt,
-        config: {
-          maxOutputTokens: 250,
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          systemInstruction:
-            'You write brief spoken morning wake-up briefings in plain conversational text without Markdown or special formatting.',
-        },
+        systemInstruction:
+          'You write brief spoken morning wake-up briefings in plain conversational text without Markdown or special formatting.',
+        maxOutputTokens: 250,
       });
 
       return res.json({
         briefingText: (response.text || '').trim(),
       });
     } catch (err: unknown) {
-      console.error('[AI Wake /api/briefing/generate error]:', err);
-      const message =
-        err instanceof Error ? err.message : 'Failed to generate morning briefing.';
-      return res.status(500).json({ error: message });
+      const parsed = parseGeminiApiError(
+        err,
+        'Failed to generate morning briefing.'
+      );
+      console.warn(
+        `[AI Wake /api/briefing/generate] HTTP ${parsed.status} (${parsed.code}): ${parsed.message}`
+      );
+      return res.status(parsed.status).json({
+        code: parsed.code,
+        error: parsed.message,
+      });
     }
   });
 
@@ -476,32 +715,7 @@ Reply in plain conversational text with no Markdown, asterisks, bullets, or quot
           : 'warm';
       const voiceCfg = VOICE_PERSONA_CONFIG[persona];
 
-      const response = await ai.models.generateContent({
-        model: VOICE_MODEL,
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text,
-                speechMetadata: {
-                  style: voiceCfg.style,
-                },
-              },
-            ],
-          },
-        ],
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: voiceCfg.voiceName,
-              },
-            },
-          },
-        },
-      });
+      const response = await generateVoiceWithRetry(ai, text, voiceCfg);
 
       const inlinePart = response.candidates?.[0]?.content?.parts?.find(
         (p) => p.inlineData?.data
@@ -519,10 +733,14 @@ Reply in plain conversational text with no Markdown, asterisks, bullets, or quot
         voiceName: voiceCfg.voiceName,
       });
     } catch (err: unknown) {
-      console.error('[AI Wake /api/voice/tts error]:', err);
-      const message =
-        err instanceof Error ? err.message : 'Failed to synthesize voice audio.';
-      return res.status(500).json({ error: message });
+      const parsed = parseGeminiApiError(err, 'Failed to synthesize voice audio.');
+      console.warn(
+        `[AI Wake /api/voice/tts] HTTP ${parsed.status} (${parsed.code}): ${parsed.message}`
+      );
+      return res.status(parsed.status).json({
+        code: parsed.code,
+        error: parsed.message,
+      });
     }
   });
 

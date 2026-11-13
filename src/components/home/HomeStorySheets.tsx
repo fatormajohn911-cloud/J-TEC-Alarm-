@@ -59,7 +59,7 @@ export const HomeStorySheets: React.FC<HomeStorySheetsProps> = ({
         animate={{ y: 0 }}
         exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-        className="relative z-10 w-full max-w-lg rounded-t-[32px] bg-white p-6 shadow-2xl border-t border-gray-100 max-h-[85vh] overflow-y-auto pb-safe"
+        className="relative z-10 w-full max-w-[480px] rounded-t-[32px] bg-white p-6 shadow-2xl border-t border-gray-100 max-h-[85vh] overflow-y-auto pb-safe"
       >
         {/* Grab Handle */}
         <div className="mx-auto h-1.5 w-12 rounded-full bg-gray-300 mb-4" />

@@ -1,9 +1,82 @@
 import { GoogleGenAI } from '@google/genai';
 
 export type VoicePersona = 'warm' | 'coach' | 'executive';
+export type VoiceKeySource = 'saved' | 'build' | 'none';
 
-const STATIC_VOICE_KEY = (import.meta.env.VITE_GEMINI_VOICE_KEY as string | undefined)?.trim();
+const VOICE_KEY_STORAGE = 'ai_wake_voice_api_key_v1';
+const BUILD_VOICE_KEY = (
+  import.meta.env.VITE_GEMINI_VOICE_KEY as string | undefined
+)?.trim();
 const VOICE_MODEL = 'gemini-3.8-flash-lite-tts';
+
+function getSavedUserVoiceKey(): string | undefined {
+  try {
+    const val = localStorage.getItem(VOICE_KEY_STORAGE)?.trim();
+    return val || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveVoiceKey(): { key?: string; source: VoiceKeySource } {
+  const saved = getSavedUserVoiceKey();
+  if (saved) return { key: saved, source: 'saved' };
+  if (BUILD_VOICE_KEY) return { key: BUILD_VOICE_KEY, source: 'build' };
+  return { key: undefined, source: 'none' };
+}
+
+export function getVoiceKeyStatus(): { isSet: boolean; source: VoiceKeySource } {
+  const resolved = resolveVoiceKey();
+  return { isSet: Boolean(resolved.key), source: resolved.source };
+}
+
+export function saveUserVoiceApiKey(key: string): void {
+  const cleaned = key.trim();
+  try {
+    if (cleaned) {
+      localStorage.setItem(VOICE_KEY_STORAGE, cleaned);
+    } else {
+      localStorage.removeItem(VOICE_KEY_STORAGE);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function clearUserVoiceApiKey(): void {
+  try {
+    localStorage.removeItem(VOICE_KEY_STORAGE);
+  } catch {
+    // ignore
+  }
+}
+
+function formatVoiceError(err: unknown, fallbackMessage: string): string {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return 'No internet connection. Please connect to the internet and try again.';
+  }
+  const raw = err instanceof Error ? err.message : String(err || '');
+  const upper = raw.toUpperCase();
+  if (upper.includes('429') || upper.includes('RESOURCE_EXHAUSTED') || upper.includes('QUOTA')) {
+    return 'Quota exceeded for this Voice API key. Upgrade billing or try again later.';
+  }
+  if (
+    upper.includes('API_KEY_INVALID') ||
+    upper.includes('API KEY NOT VALID') ||
+    upper.includes('PERMISSION_DENIED') ||
+    upper.includes('401') ||
+    upper.includes('403')
+  ) {
+    return 'Invalid Voice API key or insufficient permissions. Please check your key.';
+  }
+  if (upper.includes('FAILED TO FETCH') || upper.includes('NETWORKERROR')) {
+    return 'Network error while contacting Gemini Voice API. Check your internet connection.';
+  }
+  if (raw && !raw.trim().startsWith('{')) {
+    return raw.split('\n')[0].slice(0, 220);
+  }
+  return fallbackMessage;
+}
 const VOICE_PERSONA_CONFIG: Record<VoicePersona, { voiceName: string; style: string }> = {
   warm: {
     voiceName: 'Zephyr',
@@ -392,75 +465,98 @@ export async function getOrGenerateVoiceBlob(
   let audioBase64: string | undefined;
   let mimeType = 'audio/wav';
 
-  try {
-    const response = await fetch('/api/voice/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: spokenText, persona }),
-    });
+  const resolved = resolveVoiceKey();
+  let serverFallbackAllowed = resolved.source === 'saved';
 
-    const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      if (response.ok) {
-        const data = (await response.json()) as {
-          audioBase64?: string;
-          mimeType?: string;
-        };
-        audioBase64 = data.audioBase64;
-        mimeType = data.mimeType || 'audio/wav';
+  if (resolved.source !== 'saved') {
+    try {
+      const response = await fetch('./api/voice/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: spokenText, persona }),
+      });
+
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        if (response.ok) {
+          const data = (await response.json()) as {
+            audioBase64?: string;
+            mimeType?: string;
+          };
+          audioBase64 = data.audioBase64;
+          mimeType = data.mimeType || 'audio/wav';
+        } else {
+          const errData = (await response.json().catch(() => ({}))) as {
+            code?: string;
+            error?: string;
+          };
+          if (
+            errData.code === 'MISSING_KEY' ||
+            response.status === 404 ||
+            response.status === 503
+          ) {
+            serverFallbackAllowed = true;
+          } else {
+            throw new Error(
+              formatVoiceError(errData.error || `Voice TTS error (${response.status})`, 'Voice TTS error.')
+            );
+          }
+        }
       } else {
-        const errData = (await response.json().catch(() => ({}))) as {
-          code?: string;
-          error?: string;
-        };
-        if (errData.code !== 'MISSING_KEY' && response.status !== 404 && response.status !== 503) {
-          throw new Error(errData.error || `Voice TTS error (${response.status})`);
+        serverFallbackAllowed = true;
+      }
+    } catch (err) {
+      if (!serverFallbackAllowed) {
+        if (resolved.key) {
+          serverFallbackAllowed = true;
+        } else {
+          throw err instanceof Error
+            ? err
+            : new Error('Voice API key is not configured.');
         }
       }
     }
-  } catch (err) {
-    if (!STATIC_VOICE_KEY) {
-      throw err instanceof Error
-        ? err
-        : new Error('Voice API key is not configured on the server.');
-    }
   }
 
-  if (!audioBase64 && STATIC_VOICE_KEY) {
+  if (!audioBase64 && resolved.key) {
     const voiceCfg = VOICE_PERSONA_CONFIG[persona] || VOICE_PERSONA_CONFIG.warm;
-    const ai = new GoogleGenAI({ apiKey: STATIC_VOICE_KEY });
-    const response = await ai.models.generateContent({
-      model: VOICE_MODEL,
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text: `${voiceCfg.style}: ${spokenText}`,
-            },
-          ],
-        },
-      ],
-      config: {
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName: voiceCfg.voiceName,
+    try {
+      const ai = new GoogleGenAI({ apiKey: resolved.key });
+      const response = await ai.models.generateContent({
+        model: VOICE_MODEL,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: `${voiceCfg.style}: ${spokenText}`,
+              },
+            ],
+          },
+        ],
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: voiceCfg.voiceName,
+              },
             },
           },
         },
-      },
-    });
-    const inlinePart = response.candidates?.[0]?.content?.parts?.find(
-      (p) => p.inlineData?.data
-    )?.inlineData;
-    audioBase64 = inlinePart?.data;
-    mimeType = inlinePart?.mimeType || 'audio/wav';
+      });
+      const inlinePart = response.candidates?.[0]?.content?.parts?.find(
+        (p) => p.inlineData?.data
+      )?.inlineData;
+      audioBase64 = inlinePart?.data;
+      mimeType = inlinePart?.mimeType || 'audio/wav';
+    } catch (err) {
+      throw new Error(formatVoiceError(err, 'Failed to synthesize voice audio.'));
+    }
   }
 
   if (!audioBase64) {
-    throw new Error('Voice API key is not configured or no audio was returned.');
+    throw new Error('Voice API key is not configured. Add one in Settings > Developer / API Keys.');
   }
 
   const { buffer, finalMimeType } = ensurePlayableAudioBuffer(audioBase64, mimeType);
@@ -558,4 +654,78 @@ export async function playTestTone(
     playbackId: 'settings_test_tone',
     onEnded,
   });
+}
+
+export async function testVoiceApiKey(
+  overrideKey?: string
+): Promise<{ ok: boolean; message: string }> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return { ok: false, message: 'No internet connection.' };
+  }
+
+  const trimmedOverride = overrideKey?.trim();
+  const resolved = resolveVoiceKey();
+  const keyToUse = trimmedOverride || resolved.key;
+  const voiceCfg = VOICE_PERSONA_CONFIG.warm;
+
+  if (!keyToUse) {
+    try {
+      const healthRes = await fetch('./api/health');
+      const ct = healthRes.headers.get('content-type') || '';
+      if (healthRes.ok && ct.includes('application/json')) {
+        const health = (await healthRes.json()) as { voiceKeyConfigured?: boolean };
+        if (health.voiceKeyConfigured) {
+          const ttsRes = await fetch('./api/voice/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: 'Ready.', persona: 'warm' }),
+          });
+          if (ttsRes.ok) {
+            return { ok: true, message: 'Server Voice API connection succeeded.' };
+          }
+          const errData = (await ttsRes.json().catch(() => ({}))) as { error?: string };
+          return {
+            ok: false,
+            message: formatVoiceError(errData.error || `Error ${ttsRes.status}`, 'Voice test failed.'),
+          };
+        }
+      }
+    } catch {
+      // fall through
+    }
+    return { ok: false, message: 'No Voice API key is set.' };
+  }
+
+  try {
+    const ai = new GoogleGenAI({ apiKey: keyToUse });
+    const response = await ai.models.generateContent({
+      model: VOICE_MODEL,
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: `${voiceCfg.style}: Ready.` }],
+        },
+      ],
+      config: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: voiceCfg.voiceName },
+          },
+        },
+      },
+    });
+    const hasAudio = Boolean(
+      response.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData?.data
+    );
+    if (!hasAudio) {
+      return { ok: false, message: 'Voice API responded without audio.' };
+    }
+    return { ok: true, message: 'Voice API key is valid and working.' };
+  } catch (err) {
+    return {
+      ok: false,
+      message: formatVoiceError(err, 'Voice API key test failed.'),
+    };
+  }
 }

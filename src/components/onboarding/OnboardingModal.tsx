@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { AiIcon } from '../common/AiIcon';
 import { AppLogo } from '../common/AppLogo';
+import { NativeAlarm } from '../../services/nativeAlarmPlugin';
 
 export type ReliabilityPermissionType =
   | 'exact'
@@ -61,8 +62,11 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     if (step > 0) setStep(step - 1);
   };
 
+  const isNative = NativeAlarm.isNative();
+
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-between bg-white text-[#1E1B4B] p-6 sm:p-10 pt-safe pb-safe overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex justify-center bg-[#EEF0F4]">
+      <div className="flex h-full w-full max-w-[480px] flex-col justify-between bg-white text-[#1E1B4B] p-6 sm:p-10 pt-safe pb-safe overflow-y-auto sm:shadow-[0_0_40px_rgba(30,27,75,0.06)]">
       {/* Top Bar: Step count & Skip */}
       <div className="flex items-center justify-between">
         {step > 0 ? (
@@ -220,7 +224,9 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   Uncompromising Reliability
                 </h1>
                 <p className="mt-1 text-xs text-[#6B7280]">
-                  Grant these four Android permissions so your alarms always ring on time:
+                  {isNative
+                    ? 'Grant these four Android permissions so your alarms always ring on time:'
+                    : 'Allow browser notifications while this page is open. Android background permissions apply in the native app.'}
                 </p>
               </div>
 
@@ -237,17 +243,23 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                       </p>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handlePermissionPress('exact')}
-                    className={`shrink-0 min-h-[36px] px-3 rounded-xl text-xs font-bold transition-colors ${
-                      settings.exactAlarmPermission
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : 'bg-[#3B3D78] text-white'
-                    }`}
-                  >
-                    {settings.exactAlarmPermission ? 'Allowed' : 'Allow'}
-                  </button>
+                  {isNative ? (
+                    <button
+                      type="button"
+                      onClick={() => handlePermissionPress('exact')}
+                      className={`shrink-0 min-h-[36px] px-3 rounded-xl text-xs font-bold transition-colors ${
+                        settings.exactAlarmPermission
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-[#3B3D78] text-white'
+                      }`}
+                    >
+                      {settings.exactAlarmPermission ? 'Allowed' : 'Allow'}
+                    </button>
+                  ) : (
+                    <span className="shrink-0 rounded-xl bg-gray-200/80 px-2.5 py-1.5 text-[11px] font-semibold text-[#6B7280]">
+                      Not applicable on web
+                    </span>
+                  )}
                 </div>
 
                 {/* Perm 2: Notifications */}
@@ -285,17 +297,23 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                       </p>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handlePermissionPress('fullscreen')}
-                    className={`shrink-0 min-h-[36px] px-3 rounded-xl text-xs font-bold transition-colors ${
-                      settings.fullScreenIntentPermission
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : 'bg-[#3B3D78] text-white'
-                    }`}
-                  >
-                    {settings.fullScreenIntentPermission ? 'Allowed' : 'Allow'}
-                  </button>
+                  {isNative ? (
+                    <button
+                      type="button"
+                      onClick={() => handlePermissionPress('fullscreen')}
+                      className={`shrink-0 min-h-[36px] px-3 rounded-xl text-xs font-bold transition-colors ${
+                        settings.fullScreenIntentPermission
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-[#3B3D78] text-white'
+                      }`}
+                    >
+                      {settings.fullScreenIntentPermission ? 'Allowed' : 'Allow'}
+                    </button>
+                  ) : (
+                    <span className="shrink-0 rounded-xl bg-gray-200/80 px-2.5 py-1.5 text-[11px] font-semibold text-[#6B7280]">
+                      Not applicable on web
+                    </span>
+                  )}
                 </div>
 
                 {/* Perm 4: Battery Exemption */}
@@ -309,17 +327,23 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                       </p>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handlePermissionPress('battery')}
-                    className={`shrink-0 min-h-[36px] px-3 rounded-xl text-xs font-bold transition-colors ${
-                      settings.batteryOptimizationExempt
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : 'bg-[#3B3D78] text-white'
-                    }`}
-                  >
-                    {settings.batteryOptimizationExempt ? 'Allowed' : 'Allow'}
-                  </button>
+                  {isNative ? (
+                    <button
+                      type="button"
+                      onClick={() => handlePermissionPress('battery')}
+                      className={`shrink-0 min-h-[36px] px-3 rounded-xl text-xs font-bold transition-colors ${
+                        settings.batteryOptimizationExempt
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-[#3B3D78] text-white'
+                      }`}
+                    >
+                      {settings.batteryOptimizationExempt ? 'Allowed' : 'Allow'}
+                    </button>
+                  ) : (
+                    <span className="shrink-0 rounded-xl bg-gray-200/80 px-2.5 py-1.5 text-[11px] font-semibold text-[#6B7280]">
+                      Not applicable on web
+                    </span>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -337,6 +361,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           <span>{step === 2 ? 'Get Started' : 'Continue'}</span>
           <ArrowRight className="h-4 w-4" />
         </button>
+      </div>
       </div>
     </div>
   );

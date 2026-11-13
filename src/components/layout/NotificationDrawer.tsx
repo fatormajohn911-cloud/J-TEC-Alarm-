@@ -15,8 +15,15 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm transition-opacity">
-      <div className="relative flex h-full w-full max-w-sm flex-col bg-white p-5 shadow-2xl">
+    <div
+      className="fixed inset-0 z-50 flex justify-center bg-black/40 backdrop-blur-sm transition-opacity"
+      onClick={onClose}
+    >
+      <div className="flex h-full w-full max-w-[480px] justify-end">
+        <div
+          className="relative flex h-full w-full max-w-sm flex-col bg-white p-5 shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
@@ -111,6 +118,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
           >
             Dismiss
           </button>
+        </div>
         </div>
       </div>
     </div>

@@ -180,7 +180,7 @@ export const AlarmFormModal: React.FC<AlarmFormModalProps> = ({
         animate={{ y: 0 }}
         exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-        className="relative z-10 w-full max-w-lg rounded-t-[32px] bg-white shadow-2xl border-t border-gray-100 flex flex-col max-h-[92vh] overflow-hidden"
+        className="relative z-10 w-full max-w-[480px] rounded-t-[32px] bg-white shadow-2xl border-t border-gray-100 flex flex-col max-h-[92vh] overflow-hidden"
       >
         {/* Grab bar */}
         <div className="pt-3 pb-1 flex justify-center">

@@ -192,7 +192,8 @@ export const AlarmRingingScreen: React.FC<AlarmRingingScreenProps> = ({
   const seconds = currentTime.getSeconds().toString().padStart(2, '0');
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-between bg-gradient-to-b from-[#1E1B4B] via-[#2E2F6B] to-[#1E1B4B] text-white p-6 sm:p-10 select-none overflow-hidden pt-safe pb-safe">
+    <div className="fixed inset-0 z-50 flex justify-center bg-[#EEF0F4] select-none">
+      <div className="relative flex h-full w-full max-w-[480px] flex-col justify-between bg-gradient-to-b from-[#1E1B4B] via-[#2E2F6B] to-[#1E1B4B] text-white p-6 sm:p-10 overflow-hidden pt-safe pb-safe sm:shadow-[0_0_40px_rgba(30,27,75,0.12)]">
       {/* Background ambient pulsing radial glow */}
       <div
         className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-30"
@@ -318,6 +319,7 @@ export const AlarmRingingScreen: React.FC<AlarmRingingScreenProps> = ({
           <Clock className="h-4 w-4 text-[#F5B800]" />
           <span>Snooze for {alarm.snoozeIntervalMinutes} min</span>
         </button>
+      </div>
       </div>
     </div>
   );

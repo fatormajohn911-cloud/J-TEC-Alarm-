@@ -65,19 +65,86 @@ class AlarmAudioEngine {
   private loopInterval: number | null = null;
   private loopSoundId = 'aurora';
   private loopVolume = 85;
+  private unlocked = false;
+  private unlockListeners = new Set<(unlocked: boolean) => void>();
 
   private initCtx() {
+    if (typeof window === 'undefined') return;
     if (!this.ctx) {
       const AudioCtx =
         window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        (window as unknown as { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
       if (AudioCtx) {
         this.ctx = new AudioCtx();
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      this.ctx.resume().catch(() => {});
     }
+    if (this.ctx && this.ctx.state === 'running' && !this.unlocked) {
+      this.setUnlocked(true);
+    }
+  }
+
+  private setUnlocked(val: boolean) {
+    if (this.unlocked === val) return;
+    this.unlocked = val;
+    this.unlockListeners.forEach((cb) => cb(val));
+  }
+
+  isUnlocked(): boolean {
+    if (this.ctx && this.ctx.state === 'running') {
+      this.unlocked = true;
+    }
+    return this.unlocked;
+  }
+
+  subscribeUnlock(cb: (unlocked: boolean) => void): () => void {
+    this.unlockListeners.add(cb);
+    cb(this.isUnlocked());
+    return () => {
+      this.unlockListeners.delete(cb);
+    };
+  }
+
+  async unlock(): Promise<boolean> {
+    if (typeof window === 'undefined') return false;
+    try {
+      this.initCtx();
+      if (!this.ctx) return false;
+      if (this.ctx.state === 'suspended') {
+        await this.ctx.resume();
+      }
+      // Play a 1-frame silent buffer so iOS Safari / Chrome unlock Web Audio
+      const buffer = this.ctx.createBuffer(1, 1, 22050);
+      const source = this.ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(this.ctx.destination);
+      source.start(0);
+      this.setUnlocked(this.ctx.state === 'running' || true);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  attachAutoUnlock(): () => void {
+    if (typeof window === 'undefined' || this.isUnlocked()) {
+      return () => {};
+    }
+    const handleFirstGesture = () => {
+      this.unlock().then((ok) => {
+        if (ok) cleanup();
+      });
+    };
+    const cleanup = () => {
+      window.removeEventListener('pointerdown', handleFirstGesture);
+      window.removeEventListener('keydown', handleFirstGesture);
+    };
+    window.addEventListener('pointerdown', handleFirstGesture, { passive: true });
+    window.addEventListener('keydown', handleFirstGesture, { passive: true });
+    return cleanup;
   }
 
   playTone(soundId: string, volume: number = 80) {

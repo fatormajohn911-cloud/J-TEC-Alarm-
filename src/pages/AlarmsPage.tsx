@@ -3,7 +3,9 @@ import { Alarm } from '../types/alarm';
 import { AlarmCard } from '../components/alarm/AlarmCard';
 import { AlarmFormModal } from '../components/alarm/AlarmFormModal';
 import { PageHeader } from '../components/layout/PageHeader';
-import { AlarmClock, Plus, Cpu, ShieldCheck } from 'lucide-react';
+import { AlarmClock, Plus, Cpu } from 'lucide-react';
+import { NativeAlarm } from '../services/nativeAlarmPlugin';
+import { WebPreviewBanner } from '../components/common/WebPreviewBanner';
 
 interface AlarmsPageProps {
   alarms: Alarm[];
@@ -70,18 +72,22 @@ export const AlarmsPage: React.FC<AlarmsPageProps> = ({
 
       <main className="main-scroll-area">
         <div className="mx-auto w-full max-w-xl px-4 py-5 space-y-4 pb-[calc(2rem+env(safe-area-inset-bottom,0px))]">
-          {/* Android Architecture Callout */}
-          <div className="rounded-[22px] bg-[#F3F3F5] p-4 flex items-start gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#3B3D78]/15 text-[#3B3D78] mt-0.5">
-              <Cpu className="h-4 w-4" />
+          {/* Web-only Banner or Native Android Architecture Callout */}
+          {NativeAlarm.isNative() ? (
+            <div className="rounded-[22px] bg-[#F3F3F5] p-4 flex items-start gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#3B3D78]/15 text-[#3B3D78] mt-0.5">
+                <Cpu className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1 text-xs text-[#6B7280] leading-relaxed">
+                <span className="font-bold text-[#1E1B4B]">Android Exact Alarm Engine:</span>
+                <p className="mt-0.5 break-words">
+                  Alarms are registered with <code className="text-[#9C1C7C] font-semibold break-all">AlarmManager.setAlarmClock()</code> to trigger exact wakeups even in deep Doze mode.
+                </p>
+              </div>
             </div>
-            <div className="min-w-0 flex-1 text-xs text-[#6B7280] leading-relaxed">
-              <span className="font-bold text-[#1E1B4B]">Android Exact Alarm Engine:</span>
-              <p className="mt-0.5 break-words">
-                Alarms are registered with <code className="text-[#9C1C7C] font-semibold break-all">AlarmManager.setAlarmClock()</code> to trigger exact wakeups even in deep Doze mode.
-              </p>
-            </div>
-          </div>
+          ) : (
+            <WebPreviewBanner />
+          )}
 
           {/* Alarms List */}
           <div className="space-y-3.5">

@@ -32,6 +32,11 @@ import {
 } from '../components/assistant/AssistantCards';
 import { hapticsService } from '../services/hapticsService';
 import {
+  checkServerTextAvailable,
+  getTextKeyStatus,
+  isTextKeyMissingError,
+} from '../services/geminiText';
+import {
   Mic,
   MicOff,
   ArrowUp,
@@ -46,6 +51,7 @@ import {
   Volume2,
   Loader2,
   RotateCcw,
+  KeyRound,
 } from 'lucide-react';
 
 interface AssistantPageProps {
@@ -61,6 +67,7 @@ interface AssistantPageProps {
   onDeleteRoutine: (id: string) => void;
   onViewAlarm: (alarmId: string) => void;
   onViewSchedule: (dayOfWeek?: number) => void;
+  onOpenApiKeySettings?: () => void;
 }
 
 interface SpeechRecognitionAlternativeLike {
@@ -164,6 +171,7 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
   onDeleteRoutine,
   onViewAlarm,
   onViewSchedule,
+  onOpenApiKeySettings,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     storageService.getChatHistory()
@@ -175,6 +183,7 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
     message: string;
     retryHistory: ChatMessage[];
   } | null>(null);
+  const [isAiMissingSetup, setIsAiMissingSetup] = useState<boolean>(false);
   const [voiceNote, setVoiceNote] = useState<string | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
@@ -216,6 +225,23 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
   useEffect(() => {
     storageService.saveChatHistory(messages);
   }, [messages]);
+
+  useEffect(() => {
+    const status = getTextKeyStatus();
+    if (status.isSet) {
+      setIsAiMissingSetup(false);
+      return;
+    }
+    let cancelled = false;
+    checkServerTextAvailable().then((serverReady) => {
+      if (!cancelled) {
+        setIsAiMissingSetup(!serverReady);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const unsub = subscribeVoicePlayback(setVoicePlayback);
@@ -289,13 +315,26 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
       setMessages((prev) => [...prev, assistantMsg]);
       setAssistantState('idle');
     } catch (err) {
-      console.error('Assistant turn failed:', err);
+      const rawMsg = err instanceof Error ? err.message : '';
+      console.warn('Assistant turn unavailable:', rawMsg || err);
       setAssistantState('idle');
+      if (isTextKeyMissingError(err)) {
+        setIsAiMissingSetup(true);
+        setErrorInfo(null);
+        return;
+      }
+      const displayMessage =
+        rawMsg &&
+        !rawMsg.trim().startsWith('{') &&
+        (rawMsg.includes('API key') ||
+          rawMsg.includes('quota') ||
+          rawMsg.includes('Settings > Secrets') ||
+          rawMsg.includes('unavailable') ||
+          rawMsg.includes('permission'))
+          ? rawMsg
+          : "Couldn't reach the assistant. Try again";
       setErrorInfo({
-        message:
-          err instanceof Error && err.message.includes('API key')
-            ? err.message
-            : "Couldn't reach the assistant. Try again",
+        message: displayMessage,
         retryHistory: historyToSend,
       });
     } finally {
@@ -957,8 +996,42 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
             </motion.div>
           )}
 
+          {/* Friendly "AI is not set up yet" Card */}
+          {isAiMissingSetup && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 rounded-[24px] border border-indigo-100 bg-[#F3F3F5] p-5 text-center space-y-3"
+            >
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-[#3B3D78]/10 text-[#3B3D78]">
+                <KeyRound className="h-5 w-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-extrabold text-[#1E1B4B]">
+                  AI is not set up yet
+                </h3>
+                <p className="text-xs text-[#6B7280] leading-relaxed">
+                  Add a Gemini Text API key in Developer / API Keys to chat, plan routines, and generate morning briefings.
+                </p>
+              </div>
+              {onOpenApiKeySettings && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    hapticsService.light();
+                    onOpenApiKeySettings();
+                  }}
+                  className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-2xl bg-[#3B3D78] hover:bg-[#2E2F6B] px-5 text-xs font-bold text-white shadow-sm transition-colors"
+                >
+                  <KeyRound className="h-4 w-4" />
+                  <span>Open Developer / API Keys</span>
+                </button>
+              )}
+            </motion.div>
+          )}
+
           {/* Friendly Error State with Retry */}
-          {errorInfo && (
+          {errorInfo && !isAiMissingSetup && (
             <motion.div
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}

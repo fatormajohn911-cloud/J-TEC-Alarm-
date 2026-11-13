@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { Alarm, NextAlarmInfo } from '../types/alarm';
 import { storageService } from '../services/storageService';
 import {
@@ -7,7 +8,49 @@ import {
   clearWebPreparedBriefing,
 } from '../services/nativeAlarmPlugin';
 import { generateMorningBriefing } from '../services/geminiText';
-import { getOrGenerateVoiceBlob, stripMarkdownForSpeech } from '../services/geminiVoice';
+import {
+  getOrGenerateVoiceBlob,
+  stripMarkdownForSpeech,
+} from '../services/geminiVoice';
+
+const BRIEFING_RETRY_COOLDOWN_MS = 15 * 60 * 1000;
+const webBriefingAttemptTimestamps = new Map<string, number>();
+const webBriefingInFlight = new Set<string>();
+
+interface PendingWebSnooze {
+  alarm: Alarm;
+  triggerAt: number;
+}
+
+function showWebAlarmNotification(alarm: Alarm) {
+  if (typeof window === 'undefined' || typeof Notification === 'undefined') {
+    return;
+  }
+  if (Notification.permission !== 'granted') return;
+
+  const title = alarm.label || 'AI Wake Alarm';
+  const body = `Alarm ringing · ${alarm.time}`;
+  try {
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.ready
+        .then((reg) => {
+          reg.showNotification(title, {
+            body,
+            icon: './icons/icon-192.png',
+            tag: `aiwake_${alarm.id}`,
+            requireInteraction: true,
+          });
+        })
+        .catch(() => {
+          new Notification(title, { body, icon: './icons/icon-192.png' });
+        });
+    } else {
+      new Notification(title, { body, icon: './icons/icon-192.png' });
+    }
+  } catch {
+    // ignore browser notification errors
+  }
+}
 
 function getNextAlarmDiffMinutes(alarm: Alarm): number {
   const now = new Date();
@@ -86,12 +129,86 @@ export function calculateNextAlarm(alarms: Alarm[]): NextAlarmInfo {
   };
 }
 
-export function useAlarms() {
+export function useAlarms(onWebAlarmTrigger?: (alarm: Alarm) => void) {
   const [alarms, setAlarms] = useState<Alarm[]>(() => storageService.getAlarms());
+  const onWebTriggerRef = useRef(onWebAlarmTrigger);
+  onWebTriggerRef.current = onWebAlarmTrigger;
+
+  const lastTriggeredMinuteRef = useRef<Map<string, string>>(new Map());
+  const pendingSnoozesRef = useRef<PendingWebSnooze[]>([]);
+  const alarmsRef = useRef(alarms);
+  alarmsRef.current = alarms;
 
   useEffect(() => {
     storageService.saveAlarms(alarms);
   }, [alarms]);
+
+  // Web fallback alarm ticker: checks enabled alarms and snoozes every second while open
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) return;
+
+    const tick = () => {
+      const now = new Date();
+      const nowMs = now.getTime();
+      const hh = now.getHours().toString().padStart(2, '0');
+      const mm = now.getMinutes().toString().padStart(2, '0');
+      const hhmm = `${hh}:${mm}`;
+      const dayIdx = now.getDay();
+      const minuteStamp = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${hhmm}`;
+
+      // 1. Check any due web snoozes
+      if (pendingSnoozesRef.current.length > 0) {
+        const remaining: PendingWebSnooze[] = [];
+        for (const item of pendingSnoozesRef.current) {
+          if (nowMs >= item.triggerAt) {
+            showWebAlarmNotification(item.alarm);
+            onWebTriggerRef.current?.(item.alarm);
+          } else {
+            remaining.push(item);
+          }
+        }
+        pendingSnoozesRef.current = remaining;
+      }
+
+      // 2. Check regular scheduled alarms
+      for (const alarm of alarmsRef.current) {
+        if (!alarm.enabled) continue;
+        if (alarm.time !== hhmm) continue;
+        const matchesDay =
+          alarm.days.length === 0 || alarm.days.includes(dayIdx);
+        if (!matchesDay) continue;
+
+        if (lastTriggeredMinuteRef.current.get(alarm.id) === minuteStamp) {
+          continue;
+        }
+        lastTriggeredMinuteRef.current.set(alarm.id, minuteStamp);
+
+        showWebAlarmNotification(alarm);
+        onWebTriggerRef.current?.(alarm);
+
+        // Auto-disable one-time alarms once they fire on web
+        if (alarm.days.length === 0) {
+          setAlarms((prev) =>
+            prev.map((a) =>
+              a.id === alarm.id ? { ...a, enabled: false } : a
+            )
+          );
+        }
+      }
+    };
+
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const scheduleWebSnooze = useCallback((alarm: Alarm, minutes: number) => {
+    if (Capacitor.isNativePlatform()) return;
+    const safeMinutes = Math.max(1, minutes || 5);
+    pendingSnoozesRef.current.push({
+      alarm,
+      triggerAt: Date.now() + safeMinutes * 60_000,
+    });
+  }, []);
 
   // Periodically check briefing readiness (native filesDir or web IndexedDB/localStorage)
   // and pre-prepare offline audio ~60m before ring when online.
@@ -109,9 +226,11 @@ export function useAlarms() {
           return alarm;
         }
 
-        const status = await NativeAlarm.getBriefingStatus(alarm.id).catch(() => ({
-          ready: false,
-        }));
+        const status = await NativeAlarm.getBriefingStatus(alarm.id).catch(
+          () => ({
+            ready: false,
+          })
+        );
 
         if (status.ready) {
           if (!alarm.briefingReady) {
@@ -122,9 +241,21 @@ export function useAlarms() {
         }
 
         // In web preview (non-native), prepare offline briefing ~60 minutes before alarm
-        if (!NativeAlarm.isNative() && typeof navigator !== 'undefined' && navigator.onLine) {
+        if (
+          !NativeAlarm.isNative() &&
+          typeof navigator !== 'undefined' &&
+          navigator.onLine
+        ) {
           const diffMins = getNextAlarmDiffMinutes(alarm);
-          if (diffMins <= 60) {
+          const lastAttempt = webBriefingAttemptTimestamps.get(alarm.id) || 0;
+          const canAttempt =
+            diffMins <= 60 &&
+            !webBriefingInFlight.has(alarm.id) &&
+            Date.now() - lastAttempt >= BRIEFING_RETRY_COOLDOWN_MS;
+
+          if (canAttempt) {
+            webBriefingInFlight.add(alarm.id);
+            webBriefingAttemptTimestamps.set(alarm.id, Date.now());
             try {
               const settings = storageService.getSettings();
               const routines = storageService.getSchedule();
@@ -137,7 +268,8 @@ export function useAlarms() {
                   durationMinutes: r.durationMinutes,
                 }));
 
-              const persona = alarm.aiVoiceStyle || settings.aiVoiceStyle || 'warm';
+              const persona =
+                alarm.aiVoiceStyle || settings.aiVoiceStyle || 'warm';
               const rawText = await generateMorningBriefing({
                 userName: settings.userName || 'Friend',
                 alarmLabel: alarm.label || 'Morning Wake',
@@ -154,7 +286,9 @@ export function useAlarms() {
               changed = true;
               return { ...alarm, briefingReady: true };
             } catch {
-              // Skip silently if keys unavailable or offline
+              // Cooldown prevents hammering quota if keys are missing or rate-limited
+            } finally {
+              webBriefingInFlight.delete(alarm.id);
             }
           }
         }
@@ -194,11 +328,15 @@ export function useAlarms() {
               snoozeLimit: a.snoozeLimit,
               aiBriefing: a.aiBriefing,
               aiVoiceStyle: a.aiVoiceStyle,
-            }).catch(console.error);
+            }).catch(() => {});
           } else {
-            NativeAlarm.cancel(a.id).catch(console.error);
+            NativeAlarm.cancel(a.id).catch(() => {});
           }
-          return { ...a, enabled: nextState, briefingReady: nextState ? a.briefingReady : false };
+          return {
+            ...a,
+            enabled: nextState,
+            briefingReady: nextState ? a.briefingReady : false,
+          };
         }
         return a;
       });
@@ -206,36 +344,41 @@ export function useAlarms() {
     });
   }, []);
 
-  const addAlarm = useCallback(async (alarmData: Omit<Alarm, 'id' | 'createdAt'>) => {
-    const newAlarm: Alarm = {
-      ...alarmData,
-      id: `alarm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      briefingReady: false,
-      createdAt: Date.now(),
-    };
-    setAlarms((prev) => [newAlarm, ...prev]);
-    if (newAlarm.enabled) {
-      await NativeAlarm.schedule({
-        id: newAlarm.id,
-        time: newAlarm.time,
-        days: newAlarm.days,
-        label: newAlarm.label,
-        soundId: newAlarm.soundId,
-        volume: newAlarm.volume,
-        vibrate: newAlarm.vibrate,
-        snoozeIntervalMinutes: newAlarm.snoozeIntervalMinutes,
-        snoozeLimit: newAlarm.snoozeLimit,
-        aiBriefing: newAlarm.aiBriefing,
-        aiVoiceStyle: newAlarm.aiVoiceStyle,
-      }).catch(console.error);
-    }
-    return newAlarm;
-  }, []);
+  const addAlarm = useCallback(
+    async (alarmData: Omit<Alarm, 'id' | 'createdAt'>) => {
+      const newAlarm: Alarm = {
+        ...alarmData,
+        id: `alarm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        briefingReady: false,
+        createdAt: Date.now(),
+      };
+      setAlarms((prev) => [newAlarm, ...prev]);
+      if (newAlarm.enabled) {
+        await NativeAlarm.schedule({
+          id: newAlarm.id,
+          time: newAlarm.time,
+          days: newAlarm.days,
+          label: newAlarm.label,
+          soundId: newAlarm.soundId,
+          volume: newAlarm.volume,
+          vibrate: newAlarm.vibrate,
+          snoozeIntervalMinutes: newAlarm.snoozeIntervalMinutes,
+          snoozeLimit: newAlarm.snoozeLimit,
+          aiBriefing: newAlarm.aiBriefing,
+          aiVoiceStyle: newAlarm.aiVoiceStyle,
+        }).catch(() => {});
+      }
+      return newAlarm;
+    },
+    []
+  );
 
   const updateAlarm = useCallback(async (updated: Alarm) => {
     clearWebPreparedBriefing(updated.id);
     const sanitized = { ...updated, briefingReady: false };
-    setAlarms((prev) => prev.map((a) => (a.id === sanitized.id ? sanitized : a)));
+    setAlarms((prev) =>
+      prev.map((a) => (a.id === sanitized.id ? sanitized : a))
+    );
     if (sanitized.enabled) {
       await NativeAlarm.schedule({
         id: sanitized.id,
@@ -249,15 +392,18 @@ export function useAlarms() {
         snoozeLimit: sanitized.snoozeLimit,
         aiBriefing: sanitized.aiBriefing,
         aiVoiceStyle: sanitized.aiVoiceStyle,
-      }).catch(console.error);
+      }).catch(() => {});
     } else {
-      await NativeAlarm.cancel(sanitized.id).catch(console.error);
+      await NativeAlarm.cancel(sanitized.id).catch(() => {});
     }
   }, []);
 
   const deleteAlarm = useCallback(async (id: string) => {
     clearWebPreparedBriefing(id);
-    await NativeAlarm.cancel(id).catch(console.error);
+    pendingSnoozesRef.current = pendingSnoozesRef.current.filter(
+      (item) => item.alarm.id !== id
+    );
+    await NativeAlarm.cancel(id).catch(() => {});
     setAlarms((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
@@ -269,5 +415,6 @@ export function useAlarms() {
     updateAlarm,
     deleteAlarm,
     refreshBriefingStatuses,
+    scheduleWebSnooze,
   };
 }
